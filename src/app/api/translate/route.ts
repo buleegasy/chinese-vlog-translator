@@ -11,11 +11,30 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
   let normB = 0.0;
   for (let i = 0; i < vecA.length; i++) {
     dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
     normB += vecB[i] * vecB[i];
   }
   if (normA === 0 || normB === 0) return 0;
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+// 超时控制包装器
+function timeoutPromise<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(errorMsg));
+    }, ms);
+
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
 }
 
 const BASE_SYSTEM_PROMPT_RULES = `
@@ -28,7 +47,7 @@ const BASE_SYSTEM_PROMPT_RULES = `
 4. 【语序倒装】：把表示程度的副词或时间状语放在句子最后（例如：今天我起床了很早；我开心了很大）。
 5. 【逻辑生硬】：高频且机械地使用“然后”、“但是”、“因为”、“所以”串联毫无逻辑关联的琐事流水账。
 6. 【抓马情感】：**仅在用户原句带有明显的负面情绪（如劳累、伤心、倒霉、迷茫）或属于长篇流水账日记时**，才可在适当位置插入一句过度严肃、悲观的翻译腔感叹（例如：“我过的是一种充满耻辱的生活”、“我觉得我又存在主义危机”、“我的人生彻底失败了”）。**如果原句只是中性或积极的普通日常（如：吃个饭、出门散步），必须保持客观平淡，绝对不要强行捏造并插入这些存在主义悲剧词汇！**
-7. 【严控长度】：**核心规则！输出的句子数量、段落结构和信息量必须与输入的原句保持绝对一致。如果用户只输入了一句简短的话，你必须且只能输出对应的一句机翻中文，绝不能自行脑补、扩充成一整篇流水账或多出其他句子。**
+7. 【严控长度】：**核心规则！输出的句子数量、段落结构 and 信息量必须与输入的原句保持绝对一致。如果用户只输入了一句简短的话，你必须且只能输出对应的一句机翻中文，绝不能自行脑补、扩充成一整篇流水账或多出其他句子。**
 `;
 
 // 1. 尝试使用主平台：Google Gemini
@@ -43,7 +62,7 @@ async function translateWithGemini(apiKey: string, text: string, systemPrompt: s
   return response.text().trim();
 }
 
-// 2. 备用平台：支持 OpenAI 兼容格式的平台（如 DeepSeek, SiliconFlow, OpenAI 等）
+// 2. 备用平台：支持 OpenAI 兼容格式的平台（如 DeepSeek, SiliconFlow, OpenRouter 等）
 async function translateWithFallback(apiKey: string, baseUrl: string, model: string, text: string, systemPrompt: string) {
   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
   const url = `${cleanBaseUrl}/chat/completions`;
@@ -88,19 +107,34 @@ export async function POST(req: Request) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json({ 
-        error: "API Key is missing in Cloudflare environment. 请确保已在 Cloudflare 控制台的 Environment Variables 中添加了 GEMINI_API_KEY，且值正确。" 
+        error: "API Key is missing in Cloudflare environment. 请确保已在 Cloudflare 控制台的环境变量中添加了 GEMINI_API_KEY。" 
       }, { status: 500 });
     }
 
-    // 初始化 Gemini API 并计算向量 (注意：向量计算也需要 API 密钥)
+    // 1. 向量计算 (使用 2026 推荐的 gemini-embedding-2 模型)
+    // 为了防止向量计算本身因为主 Key 限流而挂掉，我们在这里也包裹一层超时保护 (1.5秒)
     const genAI = new GoogleGenerativeAI(apiKey);
     const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-2" });
-    const embedResult = await embeddingModel.embedContent(text);
-    const queryVector = embedResult.embedding.values;
+    
+    let queryVector: number[];
+    try {
+      const embedResult = await timeoutPromise(
+        embeddingModel.embedContent(text),
+        1500,
+        "向量计算接口响应超时"
+      );
+      queryVector = embedResult.embedding.values;
+    } catch (embedError: any) {
+      console.warn("向量生成失败（可能因主 Key 限流），使用降级匹配...", embedError);
+      // 如果向量生成失败，不破坏整个翻译流程，我们直接默认随机挑选前 2 个语料作为参考，确保翻译能继续
+      queryVector = [];
+    }
 
     // 计算余弦相似度并排序
     const scoredCorpus = corpus.map(item => {
-      const similarity = cosineSimilarity(queryVector, item.embedding);
+      const similarity = queryVector.length > 0 
+        ? cosineSimilarity(queryVector, item.embedding)
+        : 0.5; // 向量丢失时使用默认分值
       return {
         input: item.input,
         output: item.output,
@@ -108,7 +142,9 @@ export async function POST(req: Request) {
       };
     });
 
-    scoredCorpus.sort((a, b) => b.similarity - a.similarity);
+    if (queryVector.length > 0) {
+      scoredCorpus.sort((a, b) => b.similarity - a.similarity);
+    }
     topExamples = scoredCorpus.slice(0, 2);
 
     // 组装动态 System Prompt
@@ -128,27 +164,37 @@ ${topExamples.map((item, idx) => `
     let translatedText = "";
     let providerUsed = "Google Gemini";
 
-    try {
-      // 步骤 A: 优先使用 Google Gemini
-      translatedText = await translateWithGemini(apiKey, text, systemPrompt);
-    } catch (geminiError: any) {
-      console.warn("主平台 Gemini 调用失败，尝试启动灾备系统...", geminiError);
+    const useFallbackAsPrimary = process.env.USE_FALLBACK_AS_PRIMARY === "true";
+    const fallbackKey = process.env.FALLBACK_API_KEY;
+    const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://api.deepseek.com/v1";
+    const fallbackModel = process.env.FALLBACK_MODEL || "deepseek-chat";
 
-      const fallbackKey = process.env.FALLBACK_API_KEY;
-      const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://api.deepseek.com/v1";
-      const fallbackModel = process.env.FALLBACK_MODEL || "deepseek-chat";
-
-      if (!fallbackKey) {
-        // 如果没有配置备用 Key，则直接抛出主平台错误
-        throw new Error(`主平台 Gemini 暂时不可用 (${geminiError?.message || "503/429"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
-      }
-
-      // 步骤 B: 启动防线，调用备用平台
+    // 如果用户显式设置了将备用平台作为首选，或者没有提供主密钥，直接直达备用平台
+    if (useFallbackAsPrimary && fallbackKey) {
+      translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
+      providerUsed = `OpenRouter (${fallbackModel})`;
+    } else {
       try {
-        translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
-        providerUsed = `灾备系统 (${fallbackModel})`;
-      } catch (fallbackError: any) {
-        throw new Error(`主备双平台均失效。主平台错误: ${geminiError?.message || "503"}; 备用平台错误: ${fallbackError?.message}`);
+        // 步骤 A: 优先使用 Google Gemini，并设置 2.5 秒的极速超时限制（防止 Gemini 抽风挂起导致页面卡死）
+        translatedText = await timeoutPromise(
+          translateWithGemini(apiKey, text, systemPrompt),
+          2500,
+          "Gemini 响应超时 (2.5s)"
+        );
+      } catch (geminiError: any) {
+        console.warn("主平台 Gemini 响应缓慢或报错，自动熔断切换至备用平台...", geminiError);
+
+        if (!fallbackKey) {
+          throw new Error(`主平台 Gemini 暂时不可用 (${geminiError?.message || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
+        }
+
+        // 步骤 B: 备用平台降级
+        try {
+          translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
+          providerUsed = `灾备系统 (${fallbackModel})`;
+        } catch (fallbackError: any) {
+          throw new Error(`主备双平台均失效。主平台错误: ${geminiError?.message || "503/Timeout"}; 备用平台错误: ${fallbackError?.message}`);
+        }
       }
     }
 
