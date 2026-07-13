@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
+export const runtime = 'edge';
+
 // 初始化 Gemini API (使用我们在 .env.local 中配置的 Key)
 // 注意：如果您的环境确实叫 3.5 flash，可以替换模型名称，但目前最稳定且速度最快的是 gemini-1.5-flash
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
