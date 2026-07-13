@@ -29,9 +29,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
-    // 尝试使用 gemini-1.5-flash (如果您确认有更高的版本号，可以自行修改此处)
+    // 使用 2026 年最新的 gemini-3.5-flash 模型
     const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
+        model: "gemini-3.5-flash",
         systemInstruction: SYSTEM_PROMPT,
     });
 
