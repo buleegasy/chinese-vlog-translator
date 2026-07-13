@@ -16,6 +16,7 @@ export default function Home() {
   const [reasoning, setReasoning] = useState<ReasoningItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const handleTranslate = async () => {
     if (!inputText.trim()) return;
@@ -23,6 +24,7 @@ export default function Home() {
     setIsGenerating(true);
     setReasoning([]);
     setProvider("");
+    setCopied(false);
     try {
       const response = await fetch('/api/translate', {
         method: 'POST',
@@ -44,6 +46,29 @@ export default function Home() {
       setOutputText("【网络错误】: 看起来网络被淹没了，我没法连接到服务器。");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!outputText) return;
+    try {
+      await navigator.clipboard.writeText(outputText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      // 备用复制方法
+      const textArea = document.createElement("textarea");
+      textArea.value = outputText;
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand('copy');
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (err2) {
+        console.error("Failed to copy", err2);
+      }
+      document.body.removeChild(textArea);
     }
   };
 
@@ -74,6 +99,11 @@ export default function Home() {
         {/* 输出区 */}
         {outputText && (
           <div style={styles.outputContainer}>
+            <div style={styles.outputHeader}>
+              <button onClick={handleCopy} style={styles.copyButton}>
+                {copied ? "已复制 ✓" : "复制结果"}
+              </button>
+            </div>
             <p style={styles.outputText}>{outputText}</p>
             {provider && (
               <div style={styles.providerInfo}>
@@ -172,6 +202,7 @@ const styles = {
     boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
   },
   outputContainer: {
+    position: 'relative' as const,
     width: '100%',
     padding: '1.25rem',
     borderRadius: '16px',
@@ -179,6 +210,23 @@ const styles = {
     background: '#ffffff',
     minHeight: '80px',
     boxShadow: '0 4px 12px rgba(0, 0, 0, 0.02)',
+  },
+  outputHeader: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    marginBottom: '0.5rem',
+  },
+  copyButton: {
+    background: 'none',
+    border: '1px solid #e2e8f0',
+    color: '#64748b',
+    fontSize: '0.75rem',
+    cursor: 'pointer',
+    padding: '3px 8px',
+    borderRadius: '6px',
+    transition: 'all 0.15s ease',
+    outline: 'none',
+    fontWeight: 500,
   },
   outputText: {
     fontSize: '1.05rem',
