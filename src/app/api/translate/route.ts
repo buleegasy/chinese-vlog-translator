@@ -93,7 +93,14 @@ ${topExamples.map((item, idx) => `
     const response = await result.response;
     const translatedText = response.text().trim();
 
-    return NextResponse.json({ result: translatedText });
+    return NextResponse.json({ 
+      result: translatedText,
+      reasoning: topExamples.map(item => ({
+        input: item.input,
+        output: item.output,
+        similarity: item.similarity
+      }))
+    });
   } catch (error) {
     console.error("RAG Translation error:", error);
     return NextResponse.json({ error: "Failed to translate via RAG" }, { status: 500 });
