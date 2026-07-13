@@ -101,8 +101,10 @@ ${topExamples.map((item, idx) => `
         similarity: item.similarity
       }))
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error("RAG Translation error:", error);
-    return NextResponse.json({ error: "Failed to translate via RAG" }, { status: 500 });
+    return NextResponse.json({ 
+      error: `Failed to translate via RAG. 错误详情: ${error?.message || error?.toString() || "未知错误"}` 
+    }, { status: 500 });
   }
 }
