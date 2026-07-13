@@ -12,6 +12,7 @@ interface ReasoningItem {
 export default function Home() {
   const [inputText, setInputText] = useState("");
   const [outputText, setOutputText] = useState("");
+  const [provider, setProvider] = useState("");
   const [reasoning, setReasoning] = useState<ReasoningItem[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [showReasoning, setShowReasoning] = useState(false);
@@ -21,6 +22,7 @@ export default function Home() {
     
     setIsGenerating(true);
     setReasoning([]);
+    setProvider("");
     try {
       const response = await fetch('/api/translate', {
         method: 'POST',
@@ -33,6 +35,7 @@ export default function Home() {
       const data = await response.json();
       if (response.ok) {
         setOutputText(data.result);
+        setProvider(data.provider || "");
         setReasoning(data.reasoning || []);
       } else {
         setOutputText("【错误】: " + (data.error || "发生了未知的错误，我的老伙计。"));
@@ -72,6 +75,11 @@ export default function Home() {
         {outputText && (
           <div style={styles.outputContainer}>
             <p style={styles.outputText}>{outputText}</p>
+            {provider && (
+              <div style={styles.providerInfo}>
+                <span style={styles.providerBadge}>服务提供商: {provider}</span>
+              </div>
+            )}
           </div>
         )}
 
@@ -178,6 +186,16 @@ const styles = {
     color: '#0f172a',
     margin: 0,
     whiteSpace: 'pre-wrap' as const,
+  },
+  providerInfo: {
+    marginTop: '0.875rem',
+    borderTop: '1px solid #f1f5f9',
+    paddingTop: '0.5rem',
+  },
+  providerBadge: {
+    fontSize: '0.75rem',
+    color: '#94a3b8',
+    fontWeight: 500,
   },
   reasoningSection: {
     marginTop: '0.5rem',
