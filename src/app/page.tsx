@@ -36,51 +36,34 @@ export default function Home() {
 
   return (
     <main style={styles.main}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>
-          <span className="text-gradient">中译中</span> (英式/机翻中文) 转换器
-        </h1>
-        <p style={styles.subtitle}>体验那种充满耻辱的、荒谬的生活语录。写了你的正常中文，看看我的老伙计怎么说。</p>
-      </div>
-
       <div style={styles.container}>
-        {/* 输入区 */}
-        <div className="glass-panel" style={styles.panel}>
-          <div style={styles.panelHeader}>
-            <span style={styles.badge}>正常中文 (索然无味)</span>
-          </div>
-          <textarea
-            style={styles.textarea}
-            placeholder="今天我休息没上班，睡了个懒觉。点了个外卖，真难吃。然后看了部烂片就睡觉了..."
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-          />
-        </div>
+        {/* 输入框 */}
+        <textarea
+          style={styles.textarea}
+          placeholder="在此输入中文（如：今天加班好累）..."
+          value={inputText}
+          onChange={(e) => setInputText(e.target.value)}
+        />
 
         {/* 转换按钮 */}
-        <div style={styles.actionArea}>
-          <button 
-            style={{...styles.button, opacity: isGenerating ? 0.7 : 1}}
-            onClick={handleTranslate}
-            disabled={isGenerating}
-          >
-            {isGenerating ? "生成中..." : "立刻转换 ➔"}
-          </button>
-        </div>
+        <button 
+          style={{
+            ...styles.button, 
+            opacity: isGenerating ? 0.6 : 1,
+            cursor: isGenerating ? 'not-allowed' : 'pointer'
+          }}
+          onClick={handleTranslate}
+          disabled={isGenerating}
+        >
+          {isGenerating ? "正在翻译..." : "转换"}
+        </button>
 
         {/* 输出区 */}
-        <div className="glass-panel" style={styles.panel}>
-          <div style={styles.panelHeader}>
-            <span style={{...styles.badge, background: 'rgba(147, 51, 234, 0.2)', color: '#d8b4fe'}}>机翻/英式中文 (充满抓马)</span>
+        {outputText && (
+          <div style={styles.outputContainer}>
+            <p style={styles.outputText}>{outputText}</p>
           </div>
-          <div style={styles.outputArea}>
-            {outputText ? (
-              <p style={styles.outputText}>{outputText}</p>
-            ) : (
-              <p style={styles.placeholder}>等待转换的文字将出现在这里，我的老伙计...</p>
-            )}
-          </div>
-        </div>
+        )}
       </div>
     </main>
   );
@@ -89,95 +72,63 @@ export default function Home() {
 const styles = {
   main: {
     minHeight: '100vh',
-    padding: '4rem 2rem',
     display: 'flex',
     flexDirection: 'column' as const,
     alignItems: 'center',
-    gap: '3rem',
-  },
-  header: {
-    textAlign: 'center' as const,
-    maxWidth: '600px',
-  },
-  title: {
-    fontSize: '3rem',
-    fontWeight: 800,
-    marginBottom: '1rem',
-    letterSpacing: '-0.02em',
-  },
-  subtitle: {
-    fontSize: '1.1rem',
-    color: 'rgba(255, 255, 255, 0.6)',
-    lineHeight: 1.6,
+    justifyContent: 'center',
+    padding: '2rem 1.5rem',
+    background: '#ffffff',
   },
   container: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: '2rem',
     width: '100%',
-    maxWidth: '1000px',
-  },
-  panel: {
+    maxWidth: '480px',
     display: 'flex',
     flexDirection: 'column' as const,
-    padding: '1.5rem',
-    gap: '1rem',
-    minHeight: '250px',
-  },
-  panelHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    marginBottom: '0.5rem',
-  },
-  badge: {
-    padding: '0.4rem 0.8rem',
-    background: 'rgba(59, 130, 246, 0.2)',
-    color: '#93c5fd',
-    borderRadius: '20px',
-    fontSize: '0.875rem',
-    fontWeight: 600,
+    gap: '1.25rem',
   },
   textarea: {
     width: '100%',
-    flex: 1,
-    background: 'transparent',
-    border: 'none',
-    color: 'var(--foreground)',
-    fontSize: '1.1rem',
-    lineHeight: 1.6,
-    resize: 'none' as const,
+    height: '160px',
+    padding: '1.25rem',
+    borderRadius: '16px',
+    border: '1px solid #e2e8f0',
+    background: '#f8fafc',
+    color: '#0f172a',
+    fontSize: '1.05rem',
+    lineHeight: '1.6',
     outline: 'none',
-    fontFamily: 'var(--font-sans)',
-  },
-  outputArea: {
-    flex: 1,
-    padding: '0.5rem 0',
-  },
-  outputText: {
-    fontSize: '1.1rem',
-    lineHeight: 1.6,
-    color: 'var(--foreground)',
-  },
-  placeholder: {
-    fontSize: '1.1rem',
-    color: 'rgba(255, 255, 255, 0.3)',
-    fontStyle: 'italic',
-  },
-  actionArea: {
-    display: 'flex',
-    justifyContent: 'center',
-    padding: '1rem 0',
+    resize: 'none' as const,
+    fontFamily: 'inherit',
+    transition: 'all 0.2s ease',
+    boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.02)',
   },
   button: {
-    background: 'linear-gradient(135deg, var(--primary), #8b5cf6)',
-    color: 'white',
+    width: '100%',
+    padding: '1rem',
+    borderRadius: '16px',
     border: 'none',
-    padding: '1rem 2.5rem',
-    borderRadius: '100px',
-    fontSize: '1.1rem',
+    background: '#000000',
+    color: '#ffffff',
+    fontSize: '1.05rem',
     fontWeight: 600,
-    cursor: 'pointer',
-    boxShadow: '0 4px 15px rgba(59, 130, 246, 0.4)',
-    transition: 'transform 0.2s, box-shadow 0.2s',
+    letterSpacing: '0.05em',
+    transition: 'all 0.2s ease',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+  },
+  outputContainer: {
+    width: '100%',
+    padding: '1.25rem',
+    borderRadius: '16px',
+    border: '1px solid #e2e8f0',
+    background: '#ffffff',
+    minHeight: '80px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.02)',
+  },
+  outputText: {
+    fontSize: '1.05rem',
+    lineHeight: '1.6',
+    color: '#0f172a',
+    margin: 0,
+    whiteSpace: 'pre-wrap' as const,
   }
 };
