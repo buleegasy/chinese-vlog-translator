@@ -3,10 +3,6 @@ import { NextResponse } from "next/server";
 
 export const runtime = 'edge';
 
-// 初始化 Gemini API (使用我们在 .env.local 中配置的 Key)
-// 注意：如果您的环境确实叫 3.5 flash，可以替换模型名称，但目前最稳定且速度最快的是 gemini-1.5-flash
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-
 const SYSTEM_PROMPT = `
 你现在是一个“机翻Vlogger语录”转换器。你需要将用户输入的正常中文，转换为一种生硬、滑稽、带有强烈英语母语者直译特征的“机翻中文/翻译腔”。
 
@@ -29,6 +25,14 @@ export async function POST(req: Request) {
     if (!text) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json({ error: "API Key is missing in Cloudflare environment. 请确保已在 Cloudflare 控制台的 Environment Variables 中添加了 GEMINI_API_KEY，且值正确。" }, { status: 500 });
+    }
+
+    // 初始化 Gemini API (在请求内部初始化，防止 Edge Runtime 预加载导致环境变量为空)
+    const genAI = new GoogleGenerativeAI(apiKey);
 
     // 使用 2026 年最新的 gemini-3.5-flash 模型
     const model = genAI.getGenerativeModel({ 
