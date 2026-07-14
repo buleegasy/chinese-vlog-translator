@@ -1,21 +1,34 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-import corpus from "@/data/corpus.json";
+import rawCorpus from "@/data/raw_corpus.json";
 
 export const runtime = 'edge';
 
-// 余弦相似度计算函数
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  let dotProduct = 0.0;
-  let normA = 0.0;
-  let normB = 0.0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
+// 本地 Bi-Gram 分词与余弦/Jaccard 相似度计算（零延迟、零API成本、100%可靠）
+function getBiGrams(text: string): string[] {
+  // 只保留中文、英文和数字
+  const clean = text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
+  const grams: string[] = [];
+  for (let i = 0; i < clean.length - 1; i++) {
+    grams.push(clean.substring(i, i + 2));
   }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  // 如果字数太少（比如只有一个字或为空），退化为单字分词
+  if (grams.length === 0 && clean.length > 0) {
+    return clean.split('');
+  }
+  return grams;
+}
+
+function calculateJaccardSimilarity(query: string, target: string): number {
+  const qGrams = new Set(getBiGrams(query));
+  const tGrams = new Set(getBiGrams(target));
+  
+  if (qGrams.size === 0 || tGrams.size === 0) return 0;
+  
+  const intersection = new Set([...qGrams].filter(x => tGrams.has(x)));
+  const union = new Set([...qGrams, ...tGrams]);
+  
+  return intersection.size / union.size;
 }
 
 // 超时控制包装器
@@ -47,7 +60,7 @@ const BASE_SYSTEM_PROMPT_RULES = `
 4. 【语序倒装】：把表示程度的副词或时间状语放在句子最后（例如：今天我起床了很早；我开心了很大）。
 5. 【逻辑生硬】：高频且机械地使用“然后”、“但是”、“因为”、“所以”串联毫无逻辑关联的琐事流水账。
 6. 【抓马情感】：**仅在用户原句带有明显的负面情绪（如劳累、伤心、倒霉、迷茫）或属于长篇流水账日记时**，才可在适当位置插入一句过度严肃、悲观的翻译腔感叹（例如：“我过的是一种充满耻辱的生活”、“我觉得我又存在主义危机”、“我的人生彻底失败了”）。**如果原句只是中性或积极的普通日常（如：吃个饭、出门散步），必须保持客观平淡，绝对不要强行捏造并插入这些存在主义悲剧词汇！**
-7. 【严控长度】：**核心规则！输出的句子数量、段落结构 and 信息量必须与输入的原句保持绝对一致。如果用户只输入了一句简短的话，你必须且只能输出对应的一句机翻中文，绝不能自行脑补、扩充成一整篇流水账或多出其他句子。**
+7. 【严控长度】：**核心规则！输出的句子数量、段落结构和信息量必须与输入的原句保持绝对一致。如果用户只输入了一句简短的话，你必须且只能输出对应的一句机翻中文，绝不能自行脑补、扩充成一整篇流水账或多出其他句子。**
 `;
 
 // 1. 尝试使用主平台：Google Gemini
@@ -62,7 +75,7 @@ async function translateWithGemini(apiKey: string, text: string, systemPrompt: s
   return response.text().trim();
 }
 
-// 2. 备用平台：支持 OpenAI 兼容格式的平台（如 DeepSeek, SiliconFlow, OpenRouter 等）
+// 2. 备用平台/主力中转：支持 OpenAI 兼容格式的平台（如 OpenRouter, DeepSeek 等）
 async function translateWithFallback(apiKey: string, baseUrl: string, model: string, text: string, systemPrompt: string) {
   const cleanBaseUrl = baseUrl.replace(/\/$/, '');
   const url = `${cleanBaseUrl}/chat/completions`;
@@ -74,7 +87,7 @@ async function translateWithFallback(apiKey: string, baseUrl: string, model: str
       'Authorization': `Bearer ${apiKey}`
     },
     body: JSON.stringify({
-      model: model || 'deepseek-chat',
+      model: model || 'minimax/minimax-m2.5',
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: text }
@@ -85,12 +98,12 @@ async function translateWithFallback(apiKey: string, baseUrl: string, model: str
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`备用 API 返回错误 (${response.status}): ${errText}`);
+    throw new Error(`备用/主力中转 API 返回错误 (${response.status}): ${errText}`);
   }
 
   const data = await response.json();
   if (!data.choices || data.choices.length === 0) {
-    throw new Error("备用 API 未返回有效的 Choices 数据");
+    throw new Error("API 未返回有效的 Choices 数据");
   }
   return data.choices[0].message.content.trim();
 }
@@ -104,37 +117,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ 
-        error: "API Key is missing in Cloudflare environment. 请确保已在 Cloudflare 控制台的环境变量中添加了 GEMINI_API_KEY。" 
-      }, { status: 500 });
-    }
-
-    // 1. 向量计算 (使用 2026 推荐的 gemini-embedding-2 模型)
-    // 为了防止向量计算本身因为主 Key 限流而挂掉，我们在这里也包裹一层超时保护 (1.5秒)
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const embeddingModel = genAI.getGenerativeModel({ model: "gemini-embedding-2" });
-    
-    let queryVector: number[];
-    try {
-      const embedResult = await timeoutPromise(
-        embeddingModel.embedContent(text),
-        1500,
-        "向量计算接口响应超时"
-      );
-      queryVector = embedResult.embedding.values;
-    } catch (embedError: any) {
-      console.warn("向量生成失败（可能因主 Key 限流），使用降级匹配...", embedError);
-      // 如果向量生成失败，不破坏整个翻译流程，我们直接默认随机挑选前 2 个语料作为参考，确保翻译能继续
-      queryVector = [];
-    }
-
-    // 计算余弦相似度并排序
-    const scoredCorpus = corpus.map(item => {
-      const similarity = queryVector.length > 0 
-        ? cosineSimilarity(queryVector, item.embedding)
-        : 0.5; // 向量丢失时使用默认分值
+    // 1. 本地 NLP 语义检索（Bi-gram Jaccard）
+    // 零网络开销，完美防范限流，秒速召回与输入最匹配的单句教科书
+    const scoredCorpus = rawCorpus.map(item => {
+      const similarity = calculateJaccardSimilarity(text, item.input);
       return {
         input: item.input,
         output: item.output,
@@ -142,9 +128,10 @@ export async function POST(req: Request) {
       };
     });
 
-    if (queryVector.length > 0) {
-      scoredCorpus.sort((a, b) => b.similarity - a.similarity);
-    }
+    // 按相似度降序排序
+    scoredCorpus.sort((a, b) => b.similarity - a.similarity);
+    
+    // 如果没有匹配到任何有交集的词，默认取前 2 条，否则取匹配度最高的前 2 条
     topExamples = scoredCorpus.slice(0, 2);
 
     // 组装动态 System Prompt
@@ -162,33 +149,36 @@ ${topExamples.map((item, idx) => `
 `;
 
     let translatedText = "";
-    let providerUsed = "Google Gemini";
+    let providerUsed = "";
 
-    const useFallbackAsPrimary = process.env.USE_FALLBACK_AS_PRIMARY === "true";
+    const useFallbackAsPrimary = process.env.USE_FALLBACK_AS_PRIMARY === "true" || !process.env.GEMINI_API_KEY;
     const fallbackKey = process.env.FALLBACK_API_KEY;
-    const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://api.deepseek.com/v1";
-    const fallbackModel = process.env.FALLBACK_MODEL || "deepseek-chat";
+    const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://openrouter.ai/api/v1";
+    // 默认模型设为用户指定的 MiniMax-M2.5
+    const fallbackModel = process.env.FALLBACK_MODEL || "minimax/minimax-m2.5";
 
-    // 如果用户显式设置了将备用平台作为首选，或者没有提供主密钥，直接直达备用平台
+    // 2. 路由分流与翻译执行
     if (useFallbackAsPrimary && fallbackKey) {
+      // 模式 A：直接走 OpenRouter (使用 MiniMax / 其他模型)
       translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
       providerUsed = `OpenRouter (${fallbackModel})`;
     } else {
+      // 模式 B：优先 Gemini，失败后降级 OpenRouter
+      const apiKey = process.env.GEMINI_API_KEY || "";
       try {
-        // 步骤 A: 优先使用 Google Gemini，并设置 2.5 秒的极速超时限制（防止 Gemini 抽风挂起导致页面卡死）
         translatedText = await timeoutPromise(
           translateWithGemini(apiKey, text, systemPrompt),
           2500,
           "Gemini 响应超时 (2.5s)"
         );
+        providerUsed = "Google Gemini";
       } catch (geminiError: any) {
-        console.warn("主平台 Gemini 响应缓慢或报错，自动熔断切换至备用平台...", geminiError);
+        console.warn("主平台 Gemini 调用失败，自动切换至中转备用平台...", geminiError);
 
         if (!fallbackKey) {
           throw new Error(`主平台 Gemini 暂时不可用 (${geminiError?.message || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
         }
 
-        // 步骤 B: 备用平台降级
         try {
           translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
           providerUsed = `灾备系统 (${fallbackModel})`;
