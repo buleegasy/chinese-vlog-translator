@@ -1,34 +1,37 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
-import rawCorpus from "@/data/raw_corpus.json";
+import embeddedCorpus from "@/data/corpus.json"; // 包含了 Cloudflare BGE-M3 向量的数据
 
 export const runtime = 'edge';
 
-// 本地 Bi-Gram 分词与余弦/Jaccard 相似度计算（零延迟、零API成本、100%可靠）
-function getBiGrams(text: string): string[] {
-  // 只保留中文、英文和数字
-  const clean = text.replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, '');
-  const grams: string[] = [];
-  for (let i = 0; i < clean.length - 1; i++) {
-    grams.push(clean.substring(i, i + 2));
+// ==================== 余弦相似度 (Cloudflare AI 向量核心) ====================
+function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (vecA.length !== vecB.length) return 0;
+  let dotProduct = 0, normA = 0, normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
   }
-  // 如果字数太少（比如只有一个字或为空），退化为单字分词
-  if (grams.length === 0 && clean.length > 0) {
-    return clean.split('');
-  }
-  return grams;
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-function calculateJaccardSimilarity(query: string, target: string): number {
-  const qGrams = new Set(getBiGrams(query));
-  const tGrams = new Set(getBiGrams(target));
-  
-  if (qGrams.size === 0 || tGrams.size === 0) return 0;
-  
-  const intersection = new Set([...qGrams].filter(x => tGrams.has(x)));
-  const union = new Set([...qGrams, ...tGrams]);
-  
-  return intersection.size / union.size;
+// 实时获取用户的输入向量
+async function getCloudflareEmbedding(text: string, accountId: string, apiToken: string) {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/baai/bge-m3`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ text: [text] })
+  });
+  if (!response.ok) throw new Error(`CF Embedding Failed: ${response.status}`);
+  const result = await response.json();
+  if (!result.success) throw new Error(`CF Embedding Error: ${JSON.stringify(result.errors)}`);
+  return result.result.data[0];
 }
 
 // 超时控制包装器
@@ -117,6 +120,7 @@ async function translateWithFallback(apiKey: string, baseUrl: string, model: str
 
 export async function POST(req: Request) {
   let topExamples: any[] = [];
+  let providerUsed = "";
   try {
     const { text } = await req.json();
 
@@ -124,22 +128,47 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No text provided" }, { status: 400 });
     }
 
-    // 1. 本地 NLP 语义检索（Bi-gram Jaccard）
-    // 零网络开销，完美防范限流，秒速召回与输入最匹配的单句教科书
-    const scoredCorpus = rawCorpus.map(item => {
-      const similarity = calculateJaccardSimilarity(text, item.input);
+    console.log(`\n🕒 [${new Date().toISOString()}] === 开始 RAG 翻译推演 ===`);
+    console.log(`[1] 收到用户输入: "${text}"`);
+
+    // ==================== 强制要求 智能 RAG 向量检索 ====================
+    // 若网络或认证失败，直接抛出异常，不再降级！
+    const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+    const cfApiToken = process.env.CLOUDFLARE_API_TOKEN;
+    
+    if (!cfAccountId || !cfApiToken) {
+      throw new Error("Cloudflare RAG 失败：未配置 Account ID 或 API Token，无法进行高精度检索。");
+    }
+
+    console.log(`[2] 开始请求 Cloudflare API 获取输入向量...`);
+    const t0 = Date.now();
+    const queryVector = await getCloudflareEmbedding(text, cfAccountId, cfApiToken);
+    console.log(`[3] 获取向量成功，耗时: ${Date.now() - t0}ms, 向量维度: ${queryVector.length}`);
+
+    const corpusArray = Array.isArray(embeddedCorpus) ? embeddedCorpus : (embeddedCorpus as any).default;
+
+    if (!corpusArray || corpusArray.length === 0 || !corpusArray[0].embedding) {
+      throw new Error("Cloudflare RAG 失败：本地语料库 corpus.json 未包含向量数据或加载失败！");
+    }
+
+    console.log(`[4] 开始在本地进行余弦相似度匹配（语料库大小：${corpusArray.length} 条）...`);
+    const t1 = Date.now();
+    
+    providerUsed += "(RAG: Cloudflare Vectors) ";
+    const scoredCorpus = corpusArray.map((item: any) => {
+      const similarity = cosineSimilarity(queryVector, item.embedding);
       return {
         input: item.input,
         output: item.output,
         similarity
       };
     });
-
-    // 按相似度降序排序
-    scoredCorpus.sort((a, b) => b.similarity - a.similarity);
     
-    // 如果没有匹配到任何有交集的词，默认取前 2 条，否则取匹配度最高的前 2 条
+    scoredCorpus.sort((a: any, b: any) => b.similarity - a.similarity);
     topExamples = scoredCorpus.slice(0, 2);
+    
+    console.log(`[5] 匹配完成，耗时: ${Date.now() - t1}ms。`);
+    console.log(`最高相似度: ${(topExamples[0].similarity * 100).toFixed(2)}% | 命中: ${topExamples[0].input}`);
 
     // 组装动态 System Prompt
     const systemPrompt = `
@@ -156,7 +185,6 @@ ${topExamples.map((item, idx) => `
 `;
 
     let translatedText = "";
-    let providerUsed = "";
 
     const useFallbackAsPrimary = process.env.USE_FALLBACK_AS_PRIMARY === "true" || !process.env.GEMINI_API_KEY;
     const fallbackKey = process.env.FALLBACK_API_KEY;
@@ -165,10 +193,15 @@ ${topExamples.map((item, idx) => `
     const fallbackModel = process.env.FALLBACK_MODEL || "minimax/minimax-m2.5";
 
     // 2. 路由分流与翻译执行
+    console.log(`[6] 开始请求大语言模型进行翻译...`);
+    const t2 = Date.now();
+    
     if (useFallbackAsPrimary && fallbackKey) {
       // 模式 A：直接走 OpenRouter (使用 MiniMax / 其他模型)
       translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
-      providerUsed = `OpenRouter (${fallbackModel})`;
+      const latency = Date.now() - t2;
+      providerUsed += `| Model: OpenRouter (${fallbackModel}, ${latency}ms)`;
+      console.log(`[7] 翻译完成 (OpenRouter - ${fallbackModel})，耗时: ${latency}ms`);
     } else {
       // 模式 B：优先 Gemini，失败后降级 OpenRouter
       const apiKey = process.env.GEMINI_API_KEY || "";
@@ -178,22 +211,32 @@ ${topExamples.map((item, idx) => `
           2500,
           "Gemini 响应超时 (2.5s)"
         );
-        providerUsed = "Google Gemini";
+        const latency = Date.now() - t2;
+        providerUsed += `| Model: Google Gemini (${latency}ms)`;
+        console.log(`[7] 翻译完成 (Google Gemini)，耗时: ${latency}ms`);
       } catch (geminiError: any) {
-        console.warn("主平台 Gemini 调用失败，自动切换至中转备用平台...", geminiError);
+        const geminiLatency = Date.now() - t2;
+        console.warn(`主平台 Gemini 调用失败 (耗时: ${geminiLatency}ms)，自动切换至中转备用平台...`, geminiError.message || geminiError);
 
         if (!fallbackKey) {
           throw new Error(`主平台 Gemini 暂时不可用 (${geminiError?.message || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
         }
 
         try {
+          console.log(`[6.5] 开始请求灾备系统 (${fallbackModel})...`);
+          const t3 = Date.now();
           translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
-          providerUsed = `灾备系统 (${fallbackModel})`;
+          const fallbackLatency = Date.now() - t3;
+          providerUsed += `| Model: 灾备系统 (${fallbackModel}, ${fallbackLatency}ms)`;
+          console.log(`[7] 翻译完成 (灾备系统 - ${fallbackModel})，耗时: ${fallbackLatency}ms`);
         } catch (fallbackError: any) {
           throw new Error(`主备双平台均失效。主平台错误: ${geminiError?.message || "503/Timeout"}; 备用平台错误: ${fallbackError?.message}`);
         }
       }
     }
+
+    const totalTime = Date.now() - t0;
+    console.log(`[8] 总流程结束，RAG+翻译总耗时: ${totalTime}ms\n`);
 
     return NextResponse.json({ 
       result: translatedText,
