@@ -227,12 +227,12 @@ ${ragSection}
     const fallbackKey = process.env.FALLBACK_API_KEY;
     const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://openrouter.ai/api/v1";
     
-    // 优先使用用户在环境变量中配置的模型，如果没有配置，则默认使用指定的 claude-3.5-haiku
-    let fallbackModel = process.env.FALLBACK_MODEL || "anthropic/claude-3.5-haiku";
+    // 优先使用用户在环境变量中配置的模型，如果没有配置，则默认使用指定的 claude-haiku-4.5
+    let fallbackModel = process.env.FALLBACK_MODEL || "anthropic/claude-haiku-4.5";
     
     // 如果环境变量里遗留了 minimax，强制覆写为 claude
     if (fallbackModel.toLowerCase().includes("minimax") || fallbackModel.includes("gemini")) {
-      fallbackModel = "anthropic/claude-3.5-haiku";
+      fallbackModel = "anthropic/claude-haiku-4.5";
     }
 
     // 2. 路由分流与翻译执行
