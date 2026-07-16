@@ -190,18 +190,22 @@ export async function POST(req: Request) {
     let ragSection = "";
     if (topSim >= HIGH_SIMILARITY_THRESHOLD) {
       ragSection = `
-⚡ 高相似度命中（${(topSim * 100).toFixed(1)}%）：以下语料与用户输入语义几乎一致。
-在确保用户输入的所有信息都被保留的前提下，尽可能直接照搬或最小化改动此条语料的输出句式和用词，不要自己重新发挥。
+⚡【高相似度硬性指令】（相似度高达 ${(topSim * 100).toFixed(1)}%）：
+当前用户输入的句子与下方【优先照搬】中的【原始输入】在语义上几乎完全相同（仅有微小差异）。
+你必须遵守以下硬性规定：
+1. **直接复制并微调句式**：禁止重新翻译或进行自主创作。必须直接照抄【机翻输出】的句子结构、降维词汇和特殊连词。
+2. **细节补齐（补差）**：如果用户输入比下方的【原始输入】多出了一两个细节词（如时间、语气词、特定人名等），你只能在这条【机翻输出】的基础上将这些细节以相同的"机翻腔"补进去，绝对不能丢掉。
+3. **不得丢弃信息**：确保最终输出中，用户输入的每个动作和细节都在，不得丢失信息。
 
 【优先照搬】
-原文：${topExamples[0].input}
+原始输入：${topExamples[0].input}
 机翻输出：${topExamples[0].output}
-${topExamples[1] ? `\n【补充参考】\n原文：${topExamples[1].input}\n机翻输出：${topExamples[1].output}` : ""}
+${topExamples[1] ? `\n【补充参考】\n原始输入：${topExamples[1].input}\n机翻输出：${topExamples[1].output}` : ""}
 `;
     } else {
       ragSection = `
 以下是语义检索召回的最相关参考，作为当前输入的风格对照：
-${topExamples.map((item, idx) => `【参考 ${idx + 1}（相关度 ${(item.similarity * 100).toFixed(1)}%）】\n原文：${item.input}\n机翻输出：${item.output}`).join("\n\n")}
+${topExamples.map((item, idx) => `【参考 ${idx + 1}（相关度 ${(item.similarity * 100).toFixed(1)}%）】\n原始输入：${item.input}\n机翻输出：${item.output}`).join("\n\n")}
 `;
     }
 
