@@ -42,7 +42,7 @@ export default function Home() {
       } else {
         setOutputText("【错误】: " + (data.error || "发生了未知的错误，我的老伙计。"));
       }
-    } catch (error) {
+    } catch {
       setOutputText("【网络错误】: 看起来网络被淹没了，我没法连接到服务器。");
     } finally {
       setIsGenerating(false);
@@ -55,7 +55,7 @@ export default function Home() {
       await navigator.clipboard.writeText(outputText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch {
       // 备用复制方法
       const textArea = document.createElement("textarea");
       textArea.value = outputText;

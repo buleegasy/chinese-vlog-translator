@@ -5,16 +5,29 @@ import embeddedCorpus from "@/data/corpus.json"; // 包含了 Cloudflare BGE-M3 
 export const runtime = 'edge';
 
 // ==================== 余弦相似度 (Cloudflare AI 向量核心) ====================
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (vecA.length !== vecB.length) return 0;
-  let dotProduct = 0, normA = 0, normB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
+// ⚡ Bolt Optimization: Calculate vector norm once to hoist out of inner loop
+function getVectorNorm(vec: number[]): number {
+  let norm = 0;
+  const len = vec.length;
+  for (let i = 0; i < len; i++) {
+    norm += vec[i] * vec[i];
+  }
+  return Math.sqrt(norm);
+}
+
+// ⚡ Bolt Optimization: Fast cosine similarity assuming normA is pre-calculated
+function fastCosineSimilarity(vecA: number[], normA: number, vecB: number[]): number {
+  let dotProduct = 0;
+  let normB = 0;
+  const len = vecA.length; // Assume lengths match for performance
+  for (let i = 0; i < len; i++) {
+    const a = vecA[i];
+    const b = vecB[i];
+    dotProduct += a * b;
+    normB += b * b;
   }
   if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  return dotProduct / (normA * Math.sqrt(normB));
 }
 
 // 实时获取用户的输入向量
@@ -146,9 +159,13 @@ export async function POST(req: Request) {
 
     const t1 = Date.now();
     providerUsed += "(RAG: Cloudflare Vectors) ";
+
+    // ⚡ Bolt Optimization: Pre-calculate the norm of the query vector once
+    const queryNorm = getVectorNorm(queryVector);
+
     const scored = (corpusArray as { input: string; output: string; embedding: number[] }[]).map(item => ({
       input: item.input, output: item.output,
-      similarity: cosineSimilarity(queryVector, item.embedding)
+      similarity: fastCosineSimilarity(queryVector, queryNorm, item.embedding)
     }));
     scored.sort((a, b) => b.similarity - a.similarity);
     topExamples = scored.slice(0, 2);
@@ -228,12 +245,13 @@ ${ragSection}
         const latency = Date.now() - t2;
         providerUsed += `| Model: Google Gemini (${latency}ms)`;
         console.log(`[7] 翻译完成 (Google Gemini)，耗时: ${latency}ms`);
-      } catch (geminiError: any) {
+      } catch (geminiError: unknown) {
         const geminiLatency = Date.now() - t2;
-        console.warn(`主平台 Gemini 调用失败 (耗时: ${geminiLatency}ms)，自动切换至中转备用平台...`, geminiError.message || geminiError);
+        const msg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+        console.warn(`主平台 Gemini 调用失败 (耗时: ${geminiLatency}ms)，自动切换至中转备用平台...`, msg);
 
         if (!fallbackKey) {
-          throw new Error(`主平台 Gemini 暂时不可用 (${geminiError?.message || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
+          throw new Error(`主平台 Gemini 暂时不可用 (${msg || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
         }
 
         try {
@@ -243,8 +261,9 @@ ${ragSection}
           const fallbackLatency = Date.now() - t3;
           providerUsed += `| Model: 灾备系统 (${fallbackModel}, ${fallbackLatency}ms)`;
           console.log(`[7] 翻译完成 (灾备系统 - ${fallbackModel})，耗时: ${fallbackLatency}ms`);
-        } catch (fallbackError: any) {
-          throw new Error(`主备双平台均失效。主平台错误: ${geminiError?.message || "503/Timeout"}; 备用平台错误: ${fallbackError?.message}`);
+        } catch (fallbackError: unknown) {
+          const fallbackMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+          throw new Error(`主备双平台均失效。主平台错误: ${msg || "503/Timeout"}; 备用平台错误: ${fallbackMsg}`);
         }
       }
     }
@@ -261,10 +280,11 @@ ${ragSection}
         similarity: item.similarity
       }))
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("RAG Translation error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ 
-      error: `翻译失败。错误详情: ${error?.message || error?.toString() || "未知错误"}` 
+      error: `翻译失败。错误详情: ${msg || "未知错误"}`
     }, { status: 500 });
   }
 }
