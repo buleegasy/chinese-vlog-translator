@@ -130,7 +130,8 @@ const BASE_SYSTEM_PROMPT_RULES = `
 // LLM 翻译函数
 async function translateWithGemini(apiKey: string, text: string, systemPrompt: string) {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash", systemInstruction: systemPrompt });
+  // 使用合法的 Gemini 模型版本，防止因找不到 3.5 导致报错降级
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", systemInstruction: systemPrompt });
   const result = await model.generateContent(text);
   return result.response.text().trim();
 }
@@ -225,8 +226,11 @@ ${ragSection}
     const useFallbackAsPrimary = process.env.USE_FALLBACK_AS_PRIMARY === "true" || !process.env.GEMINI_API_KEY;
     const fallbackKey = process.env.FALLBACK_API_KEY;
     const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://openrouter.ai/api/v1";
-    // 默认模型设为用户指定的 MiniMax-M2.5
-    const fallbackModel = process.env.FALLBACK_MODEL || "google/gemini-2.5-flash";
+    let fallbackModel = process.env.FALLBACK_MODEL || "google/gemini-2.5-flash";
+    // 强制阻止使用 lossy 严重的 minimax 模型（防止 Cloudflare 环境变量中仍然配置了旧模型）
+    if (fallbackModel.toLowerCase().includes("minimax")) {
+      fallbackModel = "google/gemini-2.5-flash";
+    }
 
     // 2. 路由分流与翻译执行
     console.log(`[6] 开始请求大语言模型进行翻译...`);
