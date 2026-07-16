@@ -190,7 +190,7 @@ ${topExamples.map((item, idx) => `
     const fallbackKey = process.env.FALLBACK_API_KEY;
     const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://openrouter.ai/api/v1";
     // 默认模型设为用户指定的 MiniMax-M2.5
-    const fallbackModel = process.env.FALLBACK_MODEL || "minimax/minimax-m2.5";
+    const fallbackModel = process.env.FALLBACK_MODEL || "google/gemini-2.5-flash";
 
     // 2. 路由分流与翻译执行
     console.log(`[6] 开始请求大语言模型进行翻译...`);
@@ -208,8 +208,8 @@ ${topExamples.map((item, idx) => `
       try {
         translatedText = await timeoutPromise(
           translateWithGemini(apiKey, text, systemPrompt),
-          2500,
-          "Gemini 响应超时 (2.5s)"
+          8000,
+          "Gemini 响应超时 (8s)"
         );
         const latency = Date.now() - t2;
         providerUsed += `| Model: Google Gemini (${latency}ms)`;
