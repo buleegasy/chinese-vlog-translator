@@ -223,13 +223,16 @@ ${ragSection}
 
     let translatedText = "";
 
-    const useFallbackAsPrimary = process.env.USE_FALLBACK_AS_PRIMARY === "true" || !process.env.GEMINI_API_KEY;
+    const useFallbackAsPrimary = true; // 强制走 OpenRouter，因为用户指定了 Claude 模型
     const fallbackKey = process.env.FALLBACK_API_KEY;
     const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://openrouter.ai/api/v1";
-    let fallbackModel = process.env.FALLBACK_MODEL || "google/gemini-2.5-flash";
-    // 强制阻止使用 lossy 严重的 minimax 模型（防止 Cloudflare 环境变量中仍然配置了旧模型）
-    if (fallbackModel.toLowerCase().includes("minimax")) {
-      fallbackModel = "google/gemini-2.5-flash";
+    
+    // 优先使用用户在环境变量中配置的模型，如果没有配置，则默认使用指定的 claude-3.5-haiku
+    let fallbackModel = process.env.FALLBACK_MODEL || "anthropic/claude-3.5-haiku";
+    
+    // 如果环境变量里遗留了 minimax，强制覆写为 claude
+    if (fallbackModel.toLowerCase().includes("minimax") || fallbackModel.includes("gemini")) {
+      fallbackModel = "anthropic/claude-3.5-haiku";
     }
 
     // 2. 路由分流与翻译执行
