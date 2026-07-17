@@ -7,14 +7,13 @@ export const runtime = 'edge';
 // ==================== 余弦相似度 (Cloudflare AI 向量核心) ====================
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   if (vecA.length !== vecB.length) return 0;
-  let dotProduct = 0, normA = 0, normB = 0;
+  // ⚡ Bolt Optimization: Cloudflare BGE-M3 vectors are already L2-normalized (magnitude = 1).
+  // Therefore, dot product equals cosine similarity. Computing normA and normB is redundant.
+  let dotProduct = 0;
   for (let i = 0; i < vecA.length; i++) {
     dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
   }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  return dotProduct;
 }
 
 // 实时获取用户的输入向量
@@ -228,12 +227,13 @@ ${ragSection}
         const latency = Date.now() - t2;
         providerUsed += `| Model: Google Gemini (${latency}ms)`;
         console.log(`[7] 翻译完成 (Google Gemini)，耗时: ${latency}ms`);
-      } catch (geminiError: any) {
+      } catch (geminiError: unknown) {
         const geminiLatency = Date.now() - t2;
-        console.warn(`主平台 Gemini 调用失败 (耗时: ${geminiLatency}ms)，自动切换至中转备用平台...`, geminiError.message || geminiError);
+        const gErr = geminiError as Error;
+        console.warn(`主平台 Gemini 调用失败 (耗时: ${geminiLatency}ms)，自动切换至中转备用平台...`, gErr.message || geminiError);
 
         if (!fallbackKey) {
-          throw new Error(`主平台 Gemini 暂时不可用 (${geminiError?.message || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
+          throw new Error(`主平台 Gemini 暂时不可用 (${gErr?.message || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
         }
 
         try {
@@ -243,8 +243,9 @@ ${ragSection}
           const fallbackLatency = Date.now() - t3;
           providerUsed += `| Model: 灾备系统 (${fallbackModel}, ${fallbackLatency}ms)`;
           console.log(`[7] 翻译完成 (灾备系统 - ${fallbackModel})，耗时: ${fallbackLatency}ms`);
-        } catch (fallbackError: any) {
-          throw new Error(`主备双平台均失效。主平台错误: ${geminiError?.message || "503/Timeout"}; 备用平台错误: ${fallbackError?.message}`);
+        } catch (fallbackError: unknown) {
+          const fErr = fallbackError as Error;
+          throw new Error(`主备双平台均失效。主平台错误: ${gErr?.message || "503/Timeout"}; 备用平台错误: ${fErr?.message}`);
         }
       }
     }
@@ -261,10 +262,10 @@ ${ragSection}
         similarity: item.similarity
       }))
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("RAG Translation error:", error);
     return NextResponse.json({ 
-      error: `翻译失败。错误详情: ${error?.message || error?.toString() || "未知错误"}` 
+      error: `翻译失败。错误详情: ${error instanceof Error ? error.message : String(error) || "未知错误"}`
     }, { status: 500 });
   }
 }

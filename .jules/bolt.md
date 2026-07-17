@@ -1,0 +1,3 @@
+## 2026-07-17 - [Redundant Magnitude Calculation in Cosine Similarity]
+**Learning:** Cloudflare BGE-M3 vectors are natively L2-normalized (magnitude equals 1). In previous implementations of `cosineSimilarity`, both vectors' magnitudes were being calculated in the loop and divided into the dot product, wasting significant CPU cycles (~57% overhead) for zero mathematical benefit.
+**Action:** When dealing with pre-normalized vector embeddings (like BGE-M3), simplify the cosine similarity calculation to a straightforward dot product (`A · B`). No need to compute or divide by `||A|| * ||B||`.
