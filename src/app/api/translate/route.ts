@@ -5,16 +5,15 @@ import embeddedCorpus from "@/data/corpus.json"; // 包含了 Cloudflare BGE-M3 
 export const runtime = 'edge';
 
 // ==================== 余弦相似度 (Cloudflare AI 向量核心) ====================
+// ⚡ Bolt Optimization: Since Cloudflare BGE-M3 embeddings are L2-normalized,
+// the denominator is always 1. We can skip magnitude calculation and just use dot product.
 function cosineSimilarity(vecA: number[], vecB: number[]): number {
   if (vecA.length !== vecB.length) return 0;
-  let dotProduct = 0, normA = 0, normB = 0;
+  let dotProduct = 0;
   for (let i = 0; i < vecA.length; i++) {
     dotProduct += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
   }
-  if (normA === 0 || normB === 0) return 0;
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+  return dotProduct;
 }
 
 // 实时获取用户的输入向量
