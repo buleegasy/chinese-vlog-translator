@@ -4,6 +4,13 @@ import embeddedCorpus from "@/data/corpus.json"; // 包含了 Cloudflare BGE-M3 
 
 export const runtime = 'edge';
 
+// ⚡ Bolt Optimization: Simple memory cache for identical translation requests.
+// In Edge runtimes (like Cloudflare Workers), module-level variables persist
+// across multiple requests hitting the same isolate, providing a free caching layer.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const translationCache = new Map<string, any>();
+const MAX_CACHE_SIZE = 1000;
+
 // ==================== 余弦相似度 (Cloudflare AI 向量核心) ====================
 // ⚡ Bolt Optimization: Since Cloudflare BGE-M3 embeddings are L2-normalized,
 // the denominator is always 1. We can skip magnitude calculation and just use dot product.
@@ -125,6 +132,12 @@ export async function POST(req: Request) {
   try {
     const { text } = await req.json();
     if (!text) return NextResponse.json({ error: "No text provided" }, { status: 400 });
+
+    const trimmedText = text.trim();
+    if (translationCache.has(trimmedText)) {
+      console.log(`\n⚡ [${new Date().toISOString()}] Bolt Cache Hit for input: "${trimmedText}"`);
+      return NextResponse.json(translationCache.get(trimmedText));
+    }
 
     console.log(`\n🕒 [${new Date().toISOString()}] === 开始 RAG 翻译推演 ===`);
     console.log(`[1] 收到用户输入: "${text}"`);
@@ -251,7 +264,7 @@ ${ragSection}
     const totalTime = Date.now() - t0;
     console.log(`[8] 总流程结束，RAG+翻译总耗时: ${totalTime}ms\n`);
 
-    return NextResponse.json({ 
+    const responsePayload = {
       result: translatedText,
       provider: providerUsed,
       reasoning: topExamples.map(item => ({
@@ -259,7 +272,17 @@ ${ragSection}
         output: item.output,
         similarity: item.similarity
       }))
-    });
+    };
+
+    // Cache the response
+    if (translationCache.size >= MAX_CACHE_SIZE) {
+      // Very simple LRU approximation: delete the first key when full
+      const firstKey = translationCache.keys().next().value;
+      if (firstKey !== undefined) translationCache.delete(firstKey);
+    }
+    translationCache.set(trimmedText, responsePayload);
+
+    return NextResponse.json(responsePayload);
   } catch (error: any) {
     console.error("RAG Translation error:", error);
     return NextResponse.json({ 
