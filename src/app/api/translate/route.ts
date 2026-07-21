@@ -158,12 +158,25 @@ export async function POST(req: Request) {
 
     const t1 = Date.now();
     providerUsed += "(RAG: Cloudflare Vectors) ";
-    const scored = (corpusArray as { input: string; output: string; embedding: number[] }[]).map(item => ({
-      input: item.input, output: item.output,
-      similarity: cosineSimilarity(queryVector, item.embedding)
-    }));
-    scored.sort((a, b) => b.similarity - a.similarity);
-    topExamples = scored.slice(0, 2);
+
+    // ⚡ Bolt Optimization: Replace O(N log N) map+sort with an O(N) single pass
+    // to find the top 2 most similar examples. This prevents allocating a large
+    // intermediate array and avoids the overhead of sorting the entire corpus.
+    let top1 = { input: "", output: "", similarity: -Infinity };
+    let top2 = { input: "", output: "", similarity: -Infinity };
+
+    for (let i = 0; i < corpusArray.length; i++) {
+      const item = corpusArray[i] as { input: string; output: string; embedding: number[] };
+      const similarity = cosineSimilarity(queryVector, item.embedding);
+      if (similarity > top1.similarity) {
+        top2 = top1;
+        top1 = { input: item.input, output: item.output, similarity };
+      } else if (similarity > top2.similarity) {
+        top2 = { input: item.input, output: item.output, similarity };
+      }
+    }
+
+    topExamples = [top1, top2].filter(x => x.similarity !== -Infinity);
     console.log(`[4] 向量匹配完成，耗时: ${Date.now() - t1}ms`);
     console.log(`最高相似度: ${(topExamples[0].similarity * 100).toFixed(2)}% | 命中: ${topExamples[0].input}`);
 
