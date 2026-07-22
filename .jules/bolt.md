@@ -5,3 +5,7 @@
 ## 2024-05-18 - [Edge Isolate Memory Caching]
 **Learning:** Next.js Edge Runtimes (like Cloudflare Workers) maintain global module-level variables across requests hitting the same isolate instance. We don't necessarily need Redis/KV for simple identical-request deduplication if instances handle multiple requests.
 **Action:** Use a simple bounded `Map` for high-latency/costly API responses keyed by input to provide a "free" caching layer that dramatically reduces repeated costs and latency for identical queries without adding external dependencies.
+
+## 2024-08-09 - [O(N) Top-K Search]
+**Learning:** For small or medium datasets in memory where only the top K (e.g. 2) results are needed, mapping all results to a new array and then sorting is $O(N \log N)$ and allocates many temporary objects.
+**Action:** Use a single-pass loop that maintains the top K elements, bringing the time complexity to $O(N)$ and reducing memory pressure significantly.
