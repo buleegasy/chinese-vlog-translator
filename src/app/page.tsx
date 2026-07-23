@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import "./globals.css";
 
 interface ReasoningItem {
@@ -10,7 +10,10 @@ interface ReasoningItem {
 }
 
 export default function Home() {
-  const [inputText, setInputText] = useState("");
+  // ⚡ Bolt Optimization: Replace controlled state with useRef for textarea.
+  // This prevents the entire Home component from re-rendering on every single keystroke,
+  // significantly improving typing performance, especially on lower-end devices.
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const [outputText, setOutputText] = useState("");
   const [provider, setProvider] = useState("");
   const [reasoning, setReasoning] = useState<ReasoningItem[]>([]);
@@ -19,7 +22,8 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
 
   const handleTranslate = async () => {
-    if (!inputText.trim()) return;
+    const text = inputRef.current?.value || "";
+    if (!text.trim()) return;
     
     setIsGenerating(true);
     setReasoning([]);
@@ -31,7 +35,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ text: inputText }),
+        body: JSON.stringify({ text }),
       });
 
       const data = await response.json();
@@ -42,7 +46,7 @@ export default function Home() {
       } else {
         setOutputText("【错误】: " + (data.error || "发生了未知的错误，我的老伙计。"));
       }
-    } catch (error) {
+    } catch {
       setOutputText("【网络错误】: 看起来网络被淹没了，我没法连接到服务器。");
     } finally {
       setIsGenerating(false);
@@ -55,7 +59,7 @@ export default function Home() {
       await navigator.clipboard.writeText(outputText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
+    } catch {
       // 备用复制方法
       const textArea = document.createElement("textarea");
       textArea.value = outputText;
@@ -77,10 +81,10 @@ export default function Home() {
       <div style={styles.container}>
         {/* 输入框 */}
         <textarea
+          ref={inputRef}
           style={styles.textarea}
           placeholder="在此输入中文（如：今天加班好累）..."
-          value={inputText}
-          onChange={(e) => setInputText(e.target.value)}
+          defaultValue=""
         />
 
         {/* 转换按钮 */}
