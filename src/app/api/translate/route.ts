@@ -192,6 +192,32 @@ export async function POST(req: Request) {
 
     // 根据 RAG 相似度决定策略：高相似度直接用语料，低相似度作风格参考
     const topSim = topExamples[0]?.similarity ?? 0;
+
+    // ⚡ Bolt Optimization: If similarity is extremely high (>= 0.99), it's virtually an exact match.
+    // We bypass the LLM generation entirely and return the best match directly.
+    if (topSim >= 0.99 && topExamples[0]) {
+      console.log(`\n⚡ [${new Date().toISOString()}] Bolt Semantic Cache Hit (Similarity: ${(topSim * 100).toFixed(2)}%) for input: "${trimmedText}"`);
+      providerUsed += "| Model: ⚡ Bolt Semantic Bypass (0ms) ";
+
+      const responsePayload = {
+        result: topExamples[0].output,
+        provider: providerUsed,
+        reasoning: topExamples.map(item => ({
+          input: item.input,
+          output: item.output,
+          similarity: item.similarity
+        }))
+      };
+
+      if (translationCache.size >= MAX_CACHE_SIZE) {
+        const firstKey = translationCache.keys().next().value;
+        if (firstKey !== undefined) translationCache.delete(firstKey);
+      }
+      translationCache.set(trimmedText, responsePayload);
+
+      return NextResponse.json(responsePayload);
+    }
+
     const HIGH_SIMILARITY_THRESHOLD = 0.88; // 超过此值：语义几乎一致，优先直接照搬
 
     let ragSection = "";

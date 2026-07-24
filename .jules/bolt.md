@@ -17,3 +17,7 @@
 ## 2024-11-20 - [Float32Array vs Normal Array in Unrolled Loops]
 **Learning:** In V8/Node.js, converting standard arrays to `Float32Array` for an unrolled cosine similarity loop surprisingly *degrades* performance by almost 2x. Standard arrays perform much faster with loop unrolling for dot products of this dimension (1024), likely due to V8's internal optimizations (e.g. PACKED_DOUBLE_ELEMENTS vs TypedArray bounds checking and cast overhead).
 **Action:** Do not blindly cast JSON parsed arrays to Typed Arrays (like `Float32Array`) for math operations without profiling first; in this codebase's specific unrolled loop, stick to native arrays.
+
+## 2026-07-24 - [Semantic Bypass for LLM RAG]
+**Learning:** For nearly identical semantic matches (similarity >= 0.99) found via Cloudflare BGE-M3 embeddings, invoking the LLM generation step is entirely redundant and a huge bottleneck (~2-8 seconds).
+**Action:** Always implement a semantic cache / early return after the vector matching step. Bypassing the LLM drops latency to ~100ms for exact or near-exact matches already present in the corpus.
