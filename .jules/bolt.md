@@ -13,3 +13,7 @@
 ## 2024-11-20 - [Optimize Cosine Similarity with Loop Unrolling]
 **Learning:** In Node.js/Edge environments, heavy numeric operations like dot products on large arrays (e.g., 1024-dimension embeddings) can be slightly bottlenecked by loop overhead and branching.
 **Action:** Unroll tight inner loops (e.g., by 4x) for operations on large arrays to reduce conditional jumps. This provides a ~20% speedup in V8/JS engines without resorting to native modules.
+
+## 2024-11-20 - [Float32Array vs Normal Array in Unrolled Loops]
+**Learning:** In V8/Node.js, converting standard arrays to `Float32Array` for an unrolled cosine similarity loop surprisingly *degrades* performance by almost 2x. Standard arrays perform much faster with loop unrolling for dot products of this dimension (1024), likely due to V8's internal optimizations (e.g. PACKED_DOUBLE_ELEMENTS vs TypedArray bounds checking and cast overhead).
+**Action:** Do not blindly cast JSON parsed arrays to Typed Arrays (like `Float32Array`) for math operations without profiling first; in this codebase's specific unrolled loop, stick to native arrays.
