@@ -151,7 +151,13 @@ export async function POST(req: Request) {
     const trimmedText = text.trim();
     if (translationCache.has(trimmedText)) {
       console.log(`\n⚡ [${new Date().toISOString()}] Bolt Cache Hit for input: "${trimmedText}"`);
-      return NextResponse.json(translationCache.get(trimmedText));
+      const cachedResponse = translationCache.get(trimmedText);
+      // ⚡ Bolt Optimization: Delete and re-insert to update Map insertion order.
+      // This converts our FIFO cache into a true LRU (Least Recently Used) cache,
+      // keeping frequently translated phrases in memory longer.
+      translationCache.delete(trimmedText);
+      translationCache.set(trimmedText, cachedResponse);
+      return NextResponse.json(cachedResponse);
     }
 
     console.log(`\n🕒 [${new Date().toISOString()}] === 开始 RAG 翻译推演 ===`);
