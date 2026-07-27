@@ -21,3 +21,7 @@
 ## 2024-11-20 - [Loop Unrolling Calibration for 1024-dim vectors]
 **Learning:** For extremely tight and repetitive CPU loops, like dot product similarity over 1024-dimension vectors in JavaScript Edge Runtimes or Node.js, there is a sweet spot for loop unrolling. Unrolling 4x provided a big jump over no unrolling, but unrolling 8x yields maximum performance (~15-20% faster than 4x). However, pushing to 16x *decreases* performance slightly due to instruction cache limits or register pressure.
 **Action:** When manually unrolling numerical loops on array iterations (like 1024 dimensions), 8x unrolling is generally the optimal balance point in V8 for maximizing CPU throughput without exhausting the instruction cache.
+
+## 2024-11-20 - [Map LRU Caching]
+**Learning:** In JavaScript, the `Map` object preserves key insertion order. A simple FIFO bounded cache using `Map.keys().next().value` drops the oldest inserted item when full, regardless of how often it is accessed.
+**Action:** Always delete and re-insert items into the `Map` when a cache hit occurs. This simple $O(1)$ trick pushes the item to the end of the insertion order, instantly converting a naive FIFO cache into a true Least Recently Used (LRU) cache, significantly improving cache hit rates for hot keys with zero extra memory overhead.
