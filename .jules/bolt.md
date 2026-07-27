@@ -25,3 +25,7 @@
 ## 2024-11-20 - [Map LRU Caching]
 **Learning:** In JavaScript, the `Map` object preserves key insertion order. A simple FIFO bounded cache using `Map.keys().next().value` drops the oldest inserted item when full, regardless of how often it is accessed.
 **Action:** Always delete and re-insert items into the `Map` when a cache hit occurs. This simple $O(1)$ trick pushes the item to the end of the insertion order, instantly converting a naive FIFO cache into a true Least Recently Used (LRU) cache, significantly improving cache hit rates for hot keys with zero extra memory overhead.
+
+## 2024-11-20 - [Module-Level JSON Array Caching]
+**Learning:** Next.js Edge APIs parsing/resolving large imported JSON arrays (like a 2.7MB RAG corpus) inside the request handler incurs per-request execution overhead. Because Edge environments (like Cloudflare Workers) maintain global module-level variables across requests hitting the same isolate instance, this work only needs to be done once per instance.
+**Action:** Always resolve and cache large, static JSON datasets at the module level (outside the `POST`/`GET` handlers) to prevent repetitive evaluation and object allocations, drastically speeding up initialization per request.
