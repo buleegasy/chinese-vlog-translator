@@ -29,3 +29,7 @@
 ## 2024-11-20 - [Module-Level JSON Array Caching]
 **Learning:** Next.js Edge APIs parsing/resolving large imported JSON arrays (like a 2.7MB RAG corpus) inside the request handler incurs per-request execution overhead. Because Edge environments (like Cloudflare Workers) maintain global module-level variables across requests hitting the same isolate instance, this work only needs to be done once per instance.
 **Action:** Always resolve and cache large, static JSON datasets at the module level (outside the `POST`/`GET` handlers) to prevent repetitive evaluation and object allocations, drastically speeding up initialization per request.
+
+## 2026-07-28 - [Request Coalescing in Edge Runtimes]
+**Learning:** High-latency API endpoints (like RAG translations involving external embeddings and LLMs) can easily suffer from cache stampedes if multiple identical requests arrive simultaneously before the first one completes and populates the cache.
+**Action:** Use a module-level Map of pending Promises (Request Coalescing) in Edge Runtimes to serve identical concurrent requests with a single downstream API call, drastically reducing cost and rate-limit risks without adding complex lock mechanisms.
