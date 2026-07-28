@@ -11,6 +11,12 @@ export const runtime = 'edge';
 const translationCache = new Map<string, any>();
 const MAX_CACHE_SIZE = 1000;
 
+// ⚡ Bolt Optimization: Request Coalescing to prevent cache stampedes.
+// If multiple identical requests arrive while one is already being processed,
+// we return the same pending promise instead of triggering redundant costly API calls.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const pendingTranslations = new Map<string, Promise<any>>();
+
 // ⚡ Bolt Optimization: Cache the resolved RAG corpus at the module level.
 // This prevents evaluating and re-allocating the large JSON array structure
 // on every single API request, speeding up initialization per request.
@@ -165,53 +171,61 @@ export async function POST(req: Request) {
       return NextResponse.json(cachedResponse);
     }
 
-    console.log(`\n🕒 [${new Date().toISOString()}] === 开始 RAG 翻译推演 ===`);
-    console.log(`[1] 收到用户输入: "${text}"`);
-
-    const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-    const cfApiToken = process.env.CLOUDFLARE_API_TOKEN;
-    if (!cfAccountId || !cfApiToken) throw new Error("Cloudflare RAG 失败：未配置 Account ID 或 API Token");
-
-    console.log(`[2] 开始请求 Cloudflare API 获取输入向量...`);
-    const t0 = Date.now();
-    const queryVector = await getCloudflareEmbedding(text, cfAccountId, cfApiToken);
-    console.log(`[3] 获取向量成功，耗时: ${Date.now() - t0}ms, 维度: ${queryVector.length}`);
-
-    if (!PRELOADED_CORPUS?.length || !(PRELOADED_CORPUS[0] as { embedding?: unknown }).embedding) {
-      throw new Error("corpus.json 未包含向量数据或加载失败");
+    // ⚡ Bolt Optimization: Request Coalescing
+    if (pendingTranslations.has(trimmedText)) {
+      console.log(`\n⚡ [${new Date().toISOString()}] Bolt Request Coalescing for input: "${trimmedText}"`);
+      const payload = await pendingTranslations.get(trimmedText);
+      return NextResponse.json(payload);
     }
 
-    const t1 = Date.now();
-    providerUsed += "(RAG: Cloudflare Vectors) ";
+    const generationPromise = (async () => {
+      console.log(`\n🕒 [${new Date().toISOString()}] === 开始 RAG 翻译推演 ===`);
+      console.log(`[1] 收到用户输入: "${text}"`);
 
-    // ⚡ Bolt Optimization: Replace O(N log N) map+sort with an O(N) single pass
-    // to find the top 2 most similar examples. This prevents allocating a large
-    // intermediate array and avoids the overhead of sorting the entire corpus.
-    let top1 = { input: "", output: "", similarity: -Infinity };
-    let top2 = { input: "", output: "", similarity: -Infinity };
+      const cfAccountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+      const cfApiToken = process.env.CLOUDFLARE_API_TOKEN;
+      if (!cfAccountId || !cfApiToken) throw new Error("Cloudflare RAG 失败：未配置 Account ID 或 API Token");
 
-    for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
-      const item = PRELOADED_CORPUS[i] as { input: string; output: string; embedding: number[] };
-      const similarity = cosineSimilarity(queryVector, item.embedding);
-      if (similarity > top1.similarity) {
-        top2 = top1;
-        top1 = { input: item.input, output: item.output, similarity };
-      } else if (similarity > top2.similarity) {
-        top2 = { input: item.input, output: item.output, similarity };
+      console.log(`[2] 开始请求 Cloudflare API 获取输入向量...`);
+      const t0 = Date.now();
+      const queryVector = await getCloudflareEmbedding(text, cfAccountId, cfApiToken);
+      console.log(`[3] 获取向量成功，耗时: ${Date.now() - t0}ms, 维度: ${queryVector.length}`);
+
+      if (!PRELOADED_CORPUS?.length || !(PRELOADED_CORPUS[0] as { embedding?: unknown }).embedding) {
+        throw new Error("corpus.json 未包含向量数据或加载失败");
       }
-    }
 
-    topExamples = [top1, top2].filter(x => x.similarity !== -Infinity);
-    console.log(`[4] 向量匹配完成，耗时: ${Date.now() - t1}ms`);
-    console.log(`最高相似度: ${(topExamples[0].similarity * 100).toFixed(2)}% | 命中: ${topExamples[0].input}`);
+      const t1 = Date.now();
+      providerUsed += "(RAG: Cloudflare Vectors) ";
 
-    // 根据 RAG 相似度决定策略：高相似度直接用语料，低相似度作风格参考
-    const topSim = topExamples[0]?.similarity ?? 0;
-    const HIGH_SIMILARITY_THRESHOLD = 0.88; // 超过此值：语义几乎一致，优先直接照搬
+      // ⚡ Bolt Optimization: Replace O(N log N) map+sort with an O(N) single pass
+      // to find the top 2 most similar examples. This prevents allocating a large
+      // intermediate array and avoids the overhead of sorting the entire corpus.
+      let top1 = { input: "", output: "", similarity: -Infinity };
+      let top2 = { input: "", output: "", similarity: -Infinity };
 
-    let ragSection = "";
-    if (topSim >= HIGH_SIMILARITY_THRESHOLD) {
-      ragSection = `
+      for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
+        const item = PRELOADED_CORPUS[i] as { input: string; output: string; embedding: number[] };
+        const similarity = cosineSimilarity(queryVector, item.embedding);
+        if (similarity > top1.similarity) {
+          top2 = top1;
+          top1 = { input: item.input, output: item.output, similarity };
+        } else if (similarity > top2.similarity) {
+          top2 = { input: item.input, output: item.output, similarity };
+        }
+      }
+
+      topExamples = [top1, top2].filter(x => x.similarity !== -Infinity);
+      console.log(`[4] 向量匹配完成，耗时: ${Date.now() - t1}ms`);
+      console.log(`最高相似度: ${(topExamples[0].similarity * 100).toFixed(2)}% | 命中: ${topExamples[0].input}`);
+
+      // 根据 RAG 相似度决定策略：高相似度直接用语料，低相似度作风格参考
+      const topSim = topExamples[0]?.similarity ?? 0;
+      const HIGH_SIMILARITY_THRESHOLD = 0.88; // 超过此值：语义几乎一致，优先直接照搬
+
+      let ragSection = "";
+      if (topSim >= HIGH_SIMILARITY_THRESHOLD) {
+        ragSection = `
 ⚡【高相似度硬性指令】（相似度高达 ${(topSim * 100).toFixed(1)}%）：
 当前用户输入的句子与下方【优先照搬】中的【原始输入】在语义上几乎完全相同（仅有微小差异）。
 你必须遵守以下硬性规定：
@@ -224,15 +238,15 @@ export async function POST(req: Request) {
 机翻输出：${topExamples[0].output}
 ${topExamples[1] ? `\n【补充参考】\n原始输入：${topExamples[1].input}\n机翻输出：${topExamples[1].output}` : ""}
 `;
-    } else {
-      ragSection = `
+      } else {
+        ragSection = `
 以下是语义检索召回的最相关参考，作为当前输入的风格对照：
 ${topExamples.map((item, idx) => `【参考 ${idx + 1}（相关度 ${(item.similarity * 100).toFixed(1)}%）】\n原始输入：${item.input}\n机翻输出：${item.output}`).join("\n\n")}
 `;
-    }
+      }
 
-    // 组装最终 System Prompt
-    const systemPrompt = `
+      // 组装最终 System Prompt
+      const systemPrompt = `
 ${BASE_SYSTEM_PROMPT_RULES}
 
 ---
@@ -242,89 +256,103 @@ ${ragSection}
 直接输出转换后的文本，不要任何解释、不要Markdown格式。
 `;
 
-    let translatedText = "";
+      let translatedText = "";
 
-    const useFallbackAsPrimary = true; // 强制走 OpenRouter，因为用户指定了 Claude 模型
-    const fallbackKey = process.env.FALLBACK_API_KEY;
-    const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://openrouter.ai/api/v1";
-    
-    // 优先使用用户在环境变量中配置的模型，如果没有配置，则默认使用指定的 claude-haiku-4.5
-    let fallbackModel = process.env.FALLBACK_MODEL || "anthropic/claude-haiku-4.5";
-    
-    // 如果环境变量里遗留了 minimax，强制覆写为 claude
-    if (fallbackModel.toLowerCase().includes("minimax") || fallbackModel.includes("gemini")) {
-      fallbackModel = "anthropic/claude-haiku-4.5";
-    }
+      const useFallbackAsPrimary = true; // 强制走 OpenRouter，因为用户指定了 Claude 模型
+      const fallbackKey = process.env.FALLBACK_API_KEY;
+      const fallbackUrl = process.env.FALLBACK_BASE_URL || "https://openrouter.ai/api/v1";
 
-    // 2. 路由分流与翻译执行
-    console.log(`[6] 开始请求大语言模型进行翻译...`);
-    const t2 = Date.now();
-    
-    if (useFallbackAsPrimary && fallbackKey) {
-      // 模式 A：直接走 OpenRouter (使用 MiniMax / 其他模型)
-      translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
-      const latency = Date.now() - t2;
-      providerUsed += `| Model: OpenRouter (${fallbackModel}, ${latency}ms)`;
-      console.log(`[7] 翻译完成 (OpenRouter - ${fallbackModel})，耗时: ${latency}ms`);
-    } else {
-      // 模式 B：优先 Gemini，失败后降级 OpenRouter
-      const apiKey = process.env.GEMINI_API_KEY || "";
-      try {
-        translatedText = await timeoutPromise(
-          translateWithGemini(apiKey, text, systemPrompt),
-          8000,
-          "Gemini 响应超时 (8s)"
-        );
+      // 优先使用用户在环境变量中配置的模型，如果没有配置，则默认使用指定的 claude-haiku-4.5
+      let fallbackModel = process.env.FALLBACK_MODEL || "anthropic/claude-haiku-4.5";
+
+      // 如果环境变量里遗留了 minimax，强制覆写为 claude
+      if (fallbackModel.toLowerCase().includes("minimax") || fallbackModel.includes("gemini")) {
+        fallbackModel = "anthropic/claude-haiku-4.5";
+      }
+
+      // 2. 路由分流与翻译执行
+      console.log(`[6] 开始请求大语言模型进行翻译...`);
+      const t2 = Date.now();
+
+      if (useFallbackAsPrimary && fallbackKey) {
+        // 模式 A：直接走 OpenRouter (使用 MiniMax / 其他模型)
+        translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
         const latency = Date.now() - t2;
-        providerUsed += `| Model: Google Gemini (${latency}ms)`;
-        console.log(`[7] 翻译完成 (Google Gemini)，耗时: ${latency}ms`);
-      } catch (geminiError: unknown) {
-        const geminiLatency = Date.now() - t2;
-        const geminiErrMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
-        console.warn(`主平台 Gemini 调用失败 (耗时: ${geminiLatency}ms)，自动切换至中转备用平台...`, geminiErrMsg);
-
-        if (!fallbackKey) {
-          throw new Error(`主平台 Gemini 暂时不可用 (${geminiErrMsg || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
-        }
-
+        providerUsed += `| Model: OpenRouter (${fallbackModel}, ${latency}ms)`;
+        console.log(`[7] 翻译完成 (OpenRouter - ${fallbackModel})，耗时: ${latency}ms`);
+      } else {
+        // 模式 B：优先 Gemini，失败后降级 OpenRouter
+        const apiKey = process.env.GEMINI_API_KEY || "";
         try {
-          console.log(`[6.5] 开始请求灾备系统 (${fallbackModel})...`);
-          const t3 = Date.now();
-          translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
-          const fallbackLatency = Date.now() - t3;
-          providerUsed += `| Model: 灾备系统 (${fallbackModel}, ${fallbackLatency}ms)`;
-          console.log(`[7] 翻译完成 (灾备系统 - ${fallbackModel})，耗时: ${fallbackLatency}ms`);
-        } catch (fallbackError: unknown) {
-          const fallbackErrMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-          throw new Error(`主备双平台均失效。主平台错误: ${geminiErrMsg || "503/Timeout"}; 备用平台错误: ${fallbackErrMsg}`);
+          translatedText = await timeoutPromise(
+            translateWithGemini(apiKey, text, systemPrompt),
+            8000,
+            "Gemini 响应超时 (8s)"
+          );
+          const latency = Date.now() - t2;
+          providerUsed += `| Model: Google Gemini (${latency}ms)`;
+          console.log(`[7] 翻译完成 (Google Gemini)，耗时: ${latency}ms`);
+        } catch (geminiError: unknown) {
+          const geminiLatency = Date.now() - t2;
+          const geminiErrMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+          console.warn(`主平台 Gemini 调用失败 (耗时: ${geminiLatency}ms)，自动切换至中转备用平台...`, geminiErrMsg);
+
+          if (!fallbackKey) {
+            throw new Error(`主平台 Gemini 暂时不可用 (${geminiErrMsg || "Timeout"}), 且未配置备用平台 (FALLBACK_API_KEY)。`);
+          }
+
+          try {
+            console.log(`[6.5] 开始请求灾备系统 (${fallbackModel})...`);
+            const t3 = Date.now();
+            translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
+            const fallbackLatency = Date.now() - t3;
+            providerUsed += `| Model: 灾备系统 (${fallbackModel}, ${fallbackLatency}ms)`;
+            console.log(`[7] 翻译完成 (灾备系统 - ${fallbackModel})，耗时: ${fallbackLatency}ms`);
+          } catch (fallbackError: unknown) {
+            const fallbackErrMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            throw new Error(`主备双平台均失效。主平台错误: ${geminiErrMsg || "503/Timeout"}; 备用平台错误: ${fallbackErrMsg}`);
+          }
         }
       }
+
+      const totalTime = Date.now() - t0;
+      console.log(`[8] 总流程结束，RAG+翻译总耗时: ${totalTime}ms\n`);
+
+      const responsePayload = {
+        result: translatedText,
+        provider: providerUsed,
+        reasoning: topExamples.map(item => ({
+          input: item.input,
+          output: item.output,
+          similarity: item.similarity
+        }))
+      };
+
+      // Cache the response
+      if (translationCache.size >= MAX_CACHE_SIZE) {
+        // Very simple LRU approximation: delete the first key when full
+        const firstKey = translationCache.keys().next().value;
+        if (firstKey !== undefined) translationCache.delete(firstKey);
+      }
+      translationCache.set(trimmedText, responsePayload);
+
+      return responsePayload;
+    })();
+
+    pendingTranslations.set(trimmedText, generationPromise);
+
+    try {
+      const responsePayload = await generationPromise;
+      return NextResponse.json(responsePayload);
+    } finally {
+      // ⚡ Bolt Optimization: Ensure we remove the pending promise when done or on error
+      // so memory doesn't leak and future identical requests (if cache evicts) can re-fetch.
+      pendingTranslations.delete(trimmedText);
     }
-
-    const totalTime = Date.now() - t0;
-    console.log(`[8] 总流程结束，RAG+翻译总耗时: ${totalTime}ms\n`);
-
-    const responsePayload = {
-      result: translatedText,
-      provider: providerUsed,
-      reasoning: topExamples.map(item => ({
-        input: item.input,
-        output: item.output,
-        similarity: item.similarity
-      }))
-    };
-
-    // Cache the response
-    if (translationCache.size >= MAX_CACHE_SIZE) {
-      // Very simple LRU approximation: delete the first key when full
-      const firstKey = translationCache.keys().next().value;
-      if (firstKey !== undefined) translationCache.delete(firstKey);
-    }
-    translationCache.set(trimmedText, responsePayload);
-
-    return NextResponse.json(responsePayload);
   } catch (error: unknown) {
     console.error("RAG Translation error:", error);
+    // If there was an error processing before the async block (e.g. JSON parsing),
+    // we also should ensure we don't leak, although pendingTranslations.delete happens inside the finally.
     const errMsg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ 
       error: `翻译失败。错误详情: ${errMsg || "未知错误"}`
