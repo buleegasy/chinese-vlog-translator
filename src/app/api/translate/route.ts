@@ -11,6 +11,11 @@ export const runtime = 'edge';
 const translationCache = new Map<string, any>();
 const MAX_CACHE_SIZE = 1000;
 
+// ⚡ Bolt Optimization: Cache the resolved RAG corpus at the module level.
+// This prevents evaluating and re-allocating the large JSON array structure
+// on every single API request, speeding up initialization per request.
+const PRELOADED_CORPUS = Array.isArray(embeddedCorpus) ? embeddedCorpus : (embeddedCorpus as { default: unknown[] }).default;
+
 // ==================== 余弦相似度 (Cloudflare AI 向量核心) ====================
 // ⚡ Bolt Optimization: Since Cloudflare BGE-M3 embeddings are L2-normalized,
 // the denominator is always 1. We can skip magnitude calculation and just use dot product.
@@ -172,8 +177,7 @@ export async function POST(req: Request) {
     const queryVector = await getCloudflareEmbedding(text, cfAccountId, cfApiToken);
     console.log(`[3] 获取向量成功，耗时: ${Date.now() - t0}ms, 维度: ${queryVector.length}`);
 
-    const corpusArray = Array.isArray(embeddedCorpus) ? embeddedCorpus : (embeddedCorpus as { default: unknown[] }).default;
-    if (!corpusArray?.length || !(corpusArray[0] as { embedding?: unknown }).embedding) {
+    if (!PRELOADED_CORPUS?.length || !(PRELOADED_CORPUS[0] as { embedding?: unknown }).embedding) {
       throw new Error("corpus.json 未包含向量数据或加载失败");
     }
 
@@ -186,8 +190,8 @@ export async function POST(req: Request) {
     let top1 = { input: "", output: "", similarity: -Infinity };
     let top2 = { input: "", output: "", similarity: -Infinity };
 
-    for (let i = 0; i < corpusArray.length; i++) {
-      const item = corpusArray[i] as { input: string; output: string; embedding: number[] };
+    for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
+      const item = PRELOADED_CORPUS[i] as { input: string; output: string; embedding: number[] };
       const similarity = cosineSimilarity(queryVector, item.embedding);
       if (similarity > top1.similarity) {
         top2 = top1;
