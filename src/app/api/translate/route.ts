@@ -22,6 +22,23 @@ const pendingTranslations = new Map<string, Promise<any>>();
 // on every single API request, speeding up initialization per request.
 const PRELOADED_CORPUS = Array.isArray(embeddedCorpus) ? embeddedCorpus : (embeddedCorpus as { default: unknown[] }).default;
 
+// ⚡ Bolt Optimization: O(1) Exact Match Short-Circuit
+// Since the edge runtime keeps variables in memory, we can build a Map of all exact matches
+// from the corpus. If a user types exactly what's in our dataset, we can instantly return it,
+// bypassing the Cloudflare Embedding network call, vector math, and LLM generation entirely!
+const CORPUS_EXACT_MATCH_MAP = new Map<string, { output: string; input: string }>();
+if (PRELOADED_CORPUS && Array.isArray(PRELOADED_CORPUS)) {
+  for (const item of PRELOADED_CORPUS) {
+    const typedItem = item as { input?: string; output?: string };
+    if (typedItem && typedItem.input && typedItem.output) {
+      CORPUS_EXACT_MATCH_MAP.set(typedItem.input.trim(), {
+        input: typedItem.input,
+        output: typedItem.output
+      });
+    }
+  }
+}
+
 // ==================== 余弦相似度 (Cloudflare AI 向量核心) ====================
 // ⚡ Bolt Optimization: Since Cloudflare BGE-M3 embeddings are L2-normalized,
 // the denominator is always 1. We can skip magnitude calculation and just use dot product.
@@ -176,6 +193,30 @@ export async function POST(req: Request) {
       console.log(`\n⚡ [${new Date().toISOString()}] Bolt Request Coalescing for input: "${trimmedText}"`);
       const payload = await pendingTranslations.get(trimmedText);
       return NextResponse.json(payload);
+    }
+
+    // ⚡ Bolt Optimization: O(1) Exact Match Short-Circuit check
+    if (CORPUS_EXACT_MATCH_MAP.has(trimmedText)) {
+      console.log(`\n⚡ [${new Date().toISOString()}] Bolt O(1) Corpus Exact Match for input: "${trimmedText}"`);
+      const match = CORPUS_EXACT_MATCH_MAP.get(trimmedText)!;
+      const responsePayload = {
+        result: match.output,
+        provider: "(O(1) Exact Match Cache)",
+        reasoning: [{
+          input: match.input,
+          output: match.output,
+          similarity: 1.0
+        }]
+      };
+
+      // Update our LRU translation cache
+      if (translationCache.size >= MAX_CACHE_SIZE) {
+        const firstKey = translationCache.keys().next().value;
+        if (firstKey !== undefined) translationCache.delete(firstKey);
+      }
+      translationCache.set(trimmedText, responsePayload);
+
+      return NextResponse.json(responsePayload);
     }
 
     const generationPromise = (async () => {

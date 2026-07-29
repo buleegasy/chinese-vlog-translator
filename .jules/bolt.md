@@ -33,3 +33,7 @@
 ## 2026-07-28 - [Request Coalescing in Edge Runtimes]
 **Learning:** High-latency API endpoints (like RAG translations involving external embeddings and LLMs) can easily suffer from cache stampedes if multiple identical requests arrive simultaneously before the first one completes and populates the cache.
 **Action:** Use a module-level Map of pending Promises (Request Coalescing) in Edge Runtimes to serve identical concurrent requests with a single downstream API call, drastically reducing cost and rate-limit risks without adding complex lock mechanisms.
+
+## 2023-10-27 - [RAG Exact Match Short-Circuit]
+**Learning:** RAG systems usually always incur a vector embedding and LLM generation cost, but when a predefined dataset (corpus) is small enough to fit in edge memory, exact matches can bypass the entire pipeline (network embedding, dense vector math, LLM API call).
+**Action:** When a static baseline corpus exists in a RAG system and strings are short (like translation sentences), always implement a hash map (Map or Record) to check for O(1) exact matches before doing O(N) cosine similarities or calling external embedding APIs.
