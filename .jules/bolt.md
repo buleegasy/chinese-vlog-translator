@@ -37,3 +37,6 @@
 ## 2023-10-27 - [RAG Exact Match Short-Circuit]
 **Learning:** RAG systems usually always incur a vector embedding and LLM generation cost, but when a predefined dataset (corpus) is small enough to fit in edge memory, exact matches can bypass the entire pipeline (network embedding, dense vector math, LLM API call).
 **Action:** When a static baseline corpus exists in a RAG system and strings are short (like translation sentences), always implement a hash map (Map or Record) to check for O(1) exact matches before doing O(N) cosine similarities or calling external embedding APIs.
+## 2024-07-30 - [Optimize Top-K Search with Index Tracking]
+**Learning:** Even within an $O(N)$ single-pass loop designed to find top K elements, creating new object literals (e.g., `{ input, output, similarity }`) on every swap or matching assignment increases garbage collection pressure, especially when iterating over large arrays in JavaScript.
+**Action:** When tracking top elements in hot loops, use primitive variables to track indices (`topIdx`) and comparison values (`topSim`), and only allocate the final object literals after the loop finishes. This approach minimizes memory allocation overhead without sacrificing readability.
