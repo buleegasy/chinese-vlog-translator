@@ -242,21 +242,36 @@ export async function POST(req: Request) {
       // ⚡ Bolt Optimization: Replace O(N log N) map+sort with an O(N) single pass
       // to find the top 2 most similar examples. This prevents allocating a large
       // intermediate array and avoids the overhead of sorting the entire corpus.
-      let top1 = { input: "", output: "", similarity: -Infinity };
-      let top2 = { input: "", output: "", similarity: -Infinity };
+      // ⚡ Bolt Optimization: Track indices instead of allocating object literals in
+      // the loop to avoid object creation overhead and reduce GC pressure.
+      let top1Idx = -1;
+      let top1Sim = -Infinity;
+      let top2Idx = -1;
+      let top2Sim = -Infinity;
 
       for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
         const item = PRELOADED_CORPUS[i] as { input: string; output: string; embedding: number[] };
         const similarity = cosineSimilarity(queryVector, item.embedding);
-        if (similarity > top1.similarity) {
-          top2 = top1;
-          top1 = { input: item.input, output: item.output, similarity };
-        } else if (similarity > top2.similarity) {
-          top2 = { input: item.input, output: item.output, similarity };
+        if (similarity > top1Sim) {
+          top2Sim = top1Sim;
+          top2Idx = top1Idx;
+          top1Sim = similarity;
+          top1Idx = i;
+        } else if (similarity > top2Sim) {
+          top2Sim = similarity;
+          top2Idx = i;
         }
       }
 
-      topExamples = [top1, top2].filter(x => x.similarity !== -Infinity);
+      topExamples = [];
+      if (top1Idx !== -1) {
+        const item = PRELOADED_CORPUS[top1Idx] as { input: string; output: string; embedding: number[] };
+        topExamples.push({ input: item.input, output: item.output, similarity: top1Sim });
+      }
+      if (top2Idx !== -1) {
+        const item = PRELOADED_CORPUS[top2Idx] as { input: string; output: string; embedding: number[] };
+        topExamples.push({ input: item.input, output: item.output, similarity: top2Sim });
+      }
       console.log(`[4] 向量匹配完成，耗时: ${Date.now() - t1}ms`);
       console.log(`最高相似度: ${(topExamples[0].similarity * 100).toFixed(2)}% | 命中: ${topExamples[0].input}`);
 
