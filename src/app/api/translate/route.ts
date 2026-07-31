@@ -177,6 +177,28 @@ export async function POST(req: Request) {
     if (!text) return NextResponse.json({ error: "No text provided" }, { status: 400 });
 
     const trimmedText = text.trim();
+
+    // ⚡ Bolt Optimization: O(1) Exact Match Short-Circuit check
+    // Moved to the very top so we don't pollute the LRU cache with static matches.
+    if (CORPUS_EXACT_MATCH_MAP.has(trimmedText)) {
+      console.log(`\n⚡ [${new Date().toISOString()}] Bolt O(1) Corpus Exact Match for input: "${trimmedText}"`);
+      const match = CORPUS_EXACT_MATCH_MAP.get(trimmedText)!;
+      const responsePayload = {
+        result: match.output,
+        provider: "(O(1) Exact Match Cache)",
+        reasoning: [{
+          input: match.input,
+          output: match.output,
+          similarity: 1.0
+        }]
+      };
+
+      // ⚡ Bolt Optimization: We NO LONGER insert into translationCache here.
+      // Inserting static matches into the LRU cache evicts expensive dynamic LLM generations,
+      // causing cache pollution. The O(1) map is permanent memory anyway.
+      return NextResponse.json(responsePayload);
+    }
+
     if (translationCache.has(trimmedText)) {
       console.log(`\n⚡ [${new Date().toISOString()}] Bolt Cache Hit for input: "${trimmedText}"`);
       const cachedResponse = translationCache.get(trimmedText);
@@ -193,30 +215,6 @@ export async function POST(req: Request) {
       console.log(`\n⚡ [${new Date().toISOString()}] Bolt Request Coalescing for input: "${trimmedText}"`);
       const payload = await pendingTranslations.get(trimmedText);
       return NextResponse.json(payload);
-    }
-
-    // ⚡ Bolt Optimization: O(1) Exact Match Short-Circuit check
-    if (CORPUS_EXACT_MATCH_MAP.has(trimmedText)) {
-      console.log(`\n⚡ [${new Date().toISOString()}] Bolt O(1) Corpus Exact Match for input: "${trimmedText}"`);
-      const match = CORPUS_EXACT_MATCH_MAP.get(trimmedText)!;
-      const responsePayload = {
-        result: match.output,
-        provider: "(O(1) Exact Match Cache)",
-        reasoning: [{
-          input: match.input,
-          output: match.output,
-          similarity: 1.0
-        }]
-      };
-
-      // Update our LRU translation cache
-      if (translationCache.size >= MAX_CACHE_SIZE) {
-        const firstKey = translationCache.keys().next().value;
-        if (firstKey !== undefined) translationCache.delete(firstKey);
-      }
-      translationCache.set(trimmedText, responsePayload);
-
-      return NextResponse.json(responsePayload);
     }
 
     const generationPromise = (async () => {

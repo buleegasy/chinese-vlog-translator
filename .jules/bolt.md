@@ -40,3 +40,6 @@
 ## 2024-07-30 - [Optimize Top-K Search with Index Tracking]
 **Learning:** Even within an $O(N)$ single-pass loop designed to find top K elements, creating new object literals (e.g., `{ input, output, similarity }`) on every swap or matching assignment increases garbage collection pressure, especially when iterating over large arrays in JavaScript.
 **Action:** When tracking top elements in hot loops, use primitive variables to track indices (`topIdx`) and comparison values (`topSim`), and only allocate the final object literals after the loop finishes. This approach minimizes memory allocation overhead without sacrificing readability.
+## 2025-01-20 - [Cache Pollution by Static Maps]
+**Learning:** In Next.js Edge APIs, populating an LRU cache with results that are already resolvable via an O(1) static Map causes severe cache pollution. This prematurely evicts expensive, dynamically computed entries (like LLM generations) when high-volume static exact matches occur.
+**Action:** Always check O(1) static lookup maps *before* the LRU cache, and never insert static map hits into the LRU cache.
