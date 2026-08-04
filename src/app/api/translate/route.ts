@@ -180,15 +180,17 @@ export async function POST(req: Request) {
 
     // ⚡ Bolt Optimization: O(1) Exact Match Short-Circuit check
     // Moved to the very top so we don't pollute the LRU cache with static matches.
-    if (CORPUS_EXACT_MATCH_MAP.has(trimmedText)) {
+    // ⚡ Bolt Optimization: Replace Map.has() + Map.get() with a single Map.get()
+    // to eliminate double hash table lookups for exact matches.
+    const exactMatch = CORPUS_EXACT_MATCH_MAP.get(trimmedText);
+    if (exactMatch) {
       console.log(`\n⚡ [${new Date().toISOString()}] Bolt O(1) Corpus Exact Match for input: "${trimmedText}"`);
-      const match = CORPUS_EXACT_MATCH_MAP.get(trimmedText)!;
       const responsePayload = {
-        result: match.output,
+        result: exactMatch.output,
         provider: "(O(1) Exact Match Cache)",
         reasoning: [{
-          input: match.input,
-          output: match.output,
+          input: exactMatch.input,
+          output: exactMatch.output,
           similarity: 1.0
         }]
       };
@@ -199,9 +201,10 @@ export async function POST(req: Request) {
       return NextResponse.json(responsePayload);
     }
 
-    if (translationCache.has(trimmedText)) {
+    // ⚡ Bolt Optimization: Eliminate double lookup for LRU Cache.
+    const cachedResponse = translationCache.get(trimmedText);
+    if (cachedResponse) {
       console.log(`\n⚡ [${new Date().toISOString()}] Bolt Cache Hit for input: "${trimmedText}"`);
-      const cachedResponse = translationCache.get(trimmedText);
       // ⚡ Bolt Optimization: Delete and re-insert to update Map insertion order.
       // This converts our FIFO cache into a true LRU (Least Recently Used) cache,
       // keeping frequently translated phrases in memory longer.
@@ -210,10 +213,11 @@ export async function POST(req: Request) {
       return NextResponse.json(cachedResponse);
     }
 
-    // ⚡ Bolt Optimization: Request Coalescing
-    if (pendingTranslations.has(trimmedText)) {
+    // ⚡ Bolt Optimization: Request Coalescing without double lookup
+    const pendingPromise = pendingTranslations.get(trimmedText);
+    if (pendingPromise) {
       console.log(`\n⚡ [${new Date().toISOString()}] Bolt Request Coalescing for input: "${trimmedText}"`);
-      const payload = await pendingTranslations.get(trimmedText);
+      const payload = await pendingPromise;
       return NextResponse.json(payload);
     }
 
@@ -247,7 +251,11 @@ export async function POST(req: Request) {
       let top2Idx = -1;
       let top2Sim = -Infinity;
 
-      for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
+      // ⚡ Bolt Optimization: Cache the length of the corpus array outside the loop
+      // to prevent the JS engine from repeatedly reading the length property,
+      // ensuring bounds checks are optimally handled.
+      const corpusLen = PRELOADED_CORPUS.length;
+      for (let i = 0; i < corpusLen; i++) {
         const item = PRELOADED_CORPUS[i] as { input: string; output: string; embedding: number[] };
         const similarity = cosineSimilarity(queryVector, item.embedding);
         if (similarity > top1Sim) {

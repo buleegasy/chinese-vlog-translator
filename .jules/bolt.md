@@ -43,3 +43,6 @@
 ## 2025-01-20 - [Cache Pollution by Static Maps]
 **Learning:** In Next.js Edge APIs, populating an LRU cache with results that are already resolvable via an O(1) static Map causes severe cache pollution. This prematurely evicts expensive, dynamically computed entries (like LLM generations) when high-volume static exact matches occur.
 **Action:** Always check O(1) static lookup maps *before* the LRU cache, and never insert static map hits into the LRU cache.
+## 2024-11-21 - [Map Double Lookup Elimination]
+**Learning:** Using `Map.has(key)` followed by `Map.get(key)` in hot paths or API handlers executes the hash function and table traversal twice.
+**Action:** Always use `const val = Map.get(key); if (val !== undefined)` (or truthiness check if applicable) to halve the lookup overhead for caches and static dictionaries.
