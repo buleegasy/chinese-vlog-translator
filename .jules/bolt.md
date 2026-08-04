@@ -46,3 +46,6 @@
 ## 2024-11-21 - [Map Double Lookup Elimination]
 **Learning:** Using `Map.has(key)` followed by `Map.get(key)` in hot paths or API handlers executes the hash function and table traversal twice.
 **Action:** Always use `const val = Map.get(key); if (val !== undefined)` (or truthiness check if applicable) to halve the lookup overhead for caches and static dictionaries.
+## 2024-05-19 - [Avoid Object Property Lookups in Hot Math Loops]
+**Learning:** In Edge environments and V8, accessing object properties (e.g. `item.embedding`) inside hot, tight mathematical loops (like iterating over thousands of vectors for cosine similarity) adds significant overhead compared to direct array access.
+**Action:** Extract nested arrays/properties from objects into flat, parallel arrays at module initialization time. Use these parallel arrays in hot math loops to bypass object property lookups and improve performance.
