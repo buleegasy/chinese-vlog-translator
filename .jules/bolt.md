@@ -49,3 +49,10 @@
 ## 2024-05-19 - [Avoid Object Property Lookups in Hot Math Loops]
 **Learning:** In Edge environments and V8, accessing object properties (e.g. `item.embedding`) inside hot, tight mathematical loops (like iterating over thousands of vectors for cosine similarity) adds significant overhead compared to direct array access.
 **Action:** Extract nested arrays/properties from objects into flat, parallel arrays at module initialization time. Use these parallel arrays in hot math loops to bypass object property lookups and improve performance.
+## 2026-08-05 - [Module Initialization Loop Fusion]
+**Learning:** Iterating over a very large JSON array (like a 2.7MB RAG corpus) multiple times during module initialization increases cold-start latency and overhead.
+**Action:** Merge multiple initialization steps (like building parallel arrays and O(1) exact match maps) into a single O(N) loop pass to minimize traversal overhead.
+
+## 2026-08-05 - [Failed Optimization: Top-K Vector Search Early Termination]
+**Learning:** Attempting to short-circuit a Top-K search loop (where K > 1) early when a single perfect match (similarity > 0.99) is found is fundamentally flawed. It breaks the Top-K constraint because the second-best result (`top2Idx`) might be left completely uninitialized or assigned a wildly incorrect local maximum, leading to crashes or severely degraded RAG output.
+**Action:** Do not blindly apply early loop termination in search functions that need to return more than one top result. Ensure that all required Top-K elements meet early-termination criteria before breaking.
