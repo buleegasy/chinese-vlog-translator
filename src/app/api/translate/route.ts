@@ -22,6 +22,17 @@ const pendingTranslations = new Map<string, Promise<any>>();
 // on every single API request, speeding up initialization per request.
 const PRELOADED_CORPUS = Array.isArray(embeddedCorpus) ? embeddedCorpus : (embeddedCorpus as { default: unknown[] }).default;
 
+// ⚡ Bolt Optimization: Parallel Array for Embeddings
+// Extract embeddings into a flat parallel array at module load time to avoid
+// expensive object property lookups (`item.embedding`) in the hot math loop.
+const PRELOADED_EMBEDDINGS: number[][] = [];
+if (PRELOADED_CORPUS && Array.isArray(PRELOADED_CORPUS)) {
+  for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
+    const item = PRELOADED_CORPUS[i] as { embedding?: number[] };
+    PRELOADED_EMBEDDINGS.push(item.embedding || []);
+  }
+}
+
 // ⚡ Bolt Optimization: O(1) Exact Match Short-Circuit
 // Since the edge runtime keeps variables in memory, we can build a Map of all exact matches
 // from the corpus. If a user types exactly what's in our dataset, we can instantly return it,
@@ -45,9 +56,10 @@ if (PRELOADED_CORPUS && Array.isArray(PRELOADED_CORPUS)) {
 // ⚡ Bolt Optimization: Unroll loop by 8x to reduce loop overhead and branching for heavy dot product math.
 // Node.js benchmarks show an 8x unroll provides a ~15-20% speedup over a 4x unroll (and ~2x speedup over no unroll)
 // for 1024-dimension vectors in JS Edge Runtimes when processing thousands of vectors.
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  const len = vecA.length;
-  if (len !== vecB.length) return 0;
+// ⚡ Bolt Optimization: Pass `len` as a parameter and remove the bounds check.
+// Since all vectors from the same model have identical lengths, skipping the check
+// eliminates a branch from the hot loop, and passing `len` avoids array property access.
+function cosineSimilarity(vecA: number[], vecB: number[], len: number): number {
   let dotProduct = 0;
   let i = 0;
   for (; i <= len - 8; i += 8) {
@@ -255,9 +267,12 @@ export async function POST(req: Request) {
       // to prevent the JS engine from repeatedly reading the length property,
       // ensuring bounds checks are optimally handled.
       const corpusLen = PRELOADED_CORPUS.length;
+      // ⚡ Bolt Optimization: Hoist queryVector.length out of the hot loop
+      const vecLen = queryVector.length;
       for (let i = 0; i < corpusLen; i++) {
-        const item = PRELOADED_CORPUS[i] as { input: string; output: string; embedding: number[] };
-        const similarity = cosineSimilarity(queryVector, item.embedding);
+        // ⚡ Bolt Optimization: Use parallel array PRELOADED_EMBEDDINGS to bypass
+        // slow object property lookup (`item.embedding`) in the hot loop.
+        const similarity = cosineSimilarity(queryVector, PRELOADED_EMBEDDINGS[i], vecLen);
         if (similarity > top1Sim) {
           top2Sim = top1Sim;
           top2Idx = top1Idx;
