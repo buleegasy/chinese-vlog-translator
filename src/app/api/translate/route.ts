@@ -22,29 +22,25 @@ const pendingTranslations = new Map<string, Promise<any>>();
 // on every single API request, speeding up initialization per request.
 const PRELOADED_CORPUS = Array.isArray(embeddedCorpus) ? embeddedCorpus : (embeddedCorpus as { default: unknown[] }).default;
 
-// ⚡ Bolt Optimization: Parallel Array for Embeddings
+// ⚡ Bolt Optimization: Parallel Array for Embeddings & Map Loop Fusion
 // Extract embeddings into a flat parallel array at module load time to avoid
 // expensive object property lookups (`item.embedding`) in the hot math loop.
+// ⚡ Bolt Optimization: Loop Fusion - We now build the O(1) exact match map
+// in the same loop, halving the O(N) traversal overhead on cold starts for the large corpus array.
 const PRELOADED_EMBEDDINGS: number[][] = [];
+const CORPUS_EXACT_MATCH_MAP = new Map<string, { output: string; input: string }>();
+
 if (PRELOADED_CORPUS && Array.isArray(PRELOADED_CORPUS)) {
   for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
-    const item = PRELOADED_CORPUS[i] as { embedding?: number[] };
+    // 1. Build parallel array for embeddings
+    const item = PRELOADED_CORPUS[i] as { embedding?: number[], input?: string, output?: string };
     PRELOADED_EMBEDDINGS.push(item.embedding || []);
-  }
-}
 
-// ⚡ Bolt Optimization: O(1) Exact Match Short-Circuit
-// Since the edge runtime keeps variables in memory, we can build a Map of all exact matches
-// from the corpus. If a user types exactly what's in our dataset, we can instantly return it,
-// bypassing the Cloudflare Embedding network call, vector math, and LLM generation entirely!
-const CORPUS_EXACT_MATCH_MAP = new Map<string, { output: string; input: string }>();
-if (PRELOADED_CORPUS && Array.isArray(PRELOADED_CORPUS)) {
-  for (const item of PRELOADED_CORPUS) {
-    const typedItem = item as { input?: string; output?: string };
-    if (typedItem && typedItem.input && typedItem.output) {
-      CORPUS_EXACT_MATCH_MAP.set(typedItem.input.trim(), {
-        input: typedItem.input,
-        output: typedItem.output
+    // 2. Build O(1) Exact Match Map
+    if (item.input && item.output) {
+      CORPUS_EXACT_MATCH_MAP.set(item.input.trim(), {
+        input: item.input,
+        output: item.output
       });
     }
   }
