@@ -269,14 +269,19 @@ export async function POST(req: Request) {
         // ⚡ Bolt Optimization: Use parallel array PRELOADED_EMBEDDINGS to bypass
         // slow object property lookup (`item.embedding`) in the hot loop.
         const similarity = cosineSimilarity(queryVector, PRELOADED_EMBEDDINGS[i], vecLen);
-        if (similarity > top1Sim) {
-          top2Sim = top1Sim;
-          top2Idx = top1Idx;
-          top1Sim = similarity;
-          top1Idx = i;
-        } else if (similarity > top2Sim) {
-          top2Sim = similarity;
-          top2Idx = i;
+        // ⚡ Bolt Optimization: Top-K Branch Check Reduction
+        // Since >99% of vectors won't even make the top 2, check the lowest threshold (top2) first.
+        // This halves the number of conditional branches evaluated in this O(N) hot loop.
+        if (similarity > top2Sim) {
+          if (similarity > top1Sim) {
+            top2Sim = top1Sim;
+            top2Idx = top1Idx;
+            top1Sim = similarity;
+            top1Idx = i;
+          } else {
+            top2Sim = similarity;
+            top2Idx = i;
+          }
         }
       }
 
