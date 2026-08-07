@@ -56,3 +56,7 @@
 ## 2026-08-05 - [Failed Optimization: Top-K Vector Search Early Termination]
 **Learning:** Attempting to short-circuit a Top-K search loop (where K > 1) early when a single perfect match (similarity > 0.99) is found is fundamentally flawed. It breaks the Top-K constraint because the second-best result (`top2Idx`) might be left completely uninitialized or assigned a wildly incorrect local maximum, leading to crashes or severely degraded RAG output.
 **Action:** Do not blindly apply early loop termination in search functions that need to return more than one top result. Ensure that all required Top-K elements meet early-termination criteria before breaking.
+
+## 2026-08-06 - [Top-K Branch Check Reduction]
+**Learning:** In a Top-K search loop (like iterating through thousands of vectors to find the top 2 matches), checking the highest rank condition (`similarity > top1Sim`) first is inefficient because >99% of elements won't even qualify for the lowest rank. If the first check falls through, the engine must evaluate the second branch (`similarity > top2Sim`) as well.
+**Action:** Always check the lowest threshold (`similarity > topKSim`) first. If it fails, you can skip all other checks, effectively halving the number of conditional branches evaluated in hot O(N) loops.
