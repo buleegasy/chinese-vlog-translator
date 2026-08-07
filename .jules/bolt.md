@@ -60,3 +60,6 @@
 ## 2026-08-06 - [Top-K Branch Check Reduction]
 **Learning:** In a Top-K search loop (like iterating through thousands of vectors to find the top 2 matches), checking the highest rank condition (`similarity > top1Sim`) first is inefficient because >99% of elements won't even qualify for the lowest rank. If the first check falls through, the engine must evaluate the second branch (`similarity > top2Sim`) as well.
 **Action:** Always check the lowest threshold (`similarity > topKSim`) first. If it fails, you can skip all other checks, effectively halving the number of conditional branches evaluated in hot O(N) loops.
+## 2026-08-07 - [Module-Level Array Pre-allocation]
+**Learning:** In JavaScript/V8, initializing an empty array (`[]`) and dynamically `.push()`ing thousands of elements into it forces the engine to repeatedly reallocate memory and resize the underlying array structure.
+**Action:** When the final size of an array is known in advance (like iterating over a static dataset during module initialization), always pre-allocate the array using `new Array(size)` and assign values by index (`arr[i] = val`). This avoids dynamic resizing overhead and reduces module cold-start latency.
