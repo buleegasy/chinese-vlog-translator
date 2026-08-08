@@ -27,14 +27,19 @@ const PRELOADED_CORPUS = Array.isArray(embeddedCorpus) ? embeddedCorpus : (embed
 // expensive object property lookups (`item.embedding`) in the hot math loop.
 // ⚡ Bolt Optimization: Loop Fusion - We now build the O(1) exact match map
 // in the same loop, halving the O(N) traversal overhead on cold starts for the large corpus array.
-const PRELOADED_EMBEDDINGS: number[][] = [];
+// ⚡ Bolt Optimization: Array Pre-allocation - Pre-allocate the PRELOADED_EMBEDDINGS
+// array to the exact size of the corpus. This avoids dynamic array resizing and
+// memory reallocation during the push operations, reducing module cold-start latency.
+const isCorpusValid = PRELOADED_CORPUS && Array.isArray(PRELOADED_CORPUS);
+const initialCorpusLen = isCorpusValid ? PRELOADED_CORPUS.length : 0;
+const PRELOADED_EMBEDDINGS: number[][] = new Array(initialCorpusLen);
 const CORPUS_EXACT_MATCH_MAP = new Map<string, { output: string; input: string }>();
 
-if (PRELOADED_CORPUS && Array.isArray(PRELOADED_CORPUS)) {
-  for (let i = 0; i < PRELOADED_CORPUS.length; i++) {
+if (isCorpusValid) {
+  for (let i = 0; i < initialCorpusLen; i++) {
     // 1. Build parallel array for embeddings
     const item = PRELOADED_CORPUS[i] as { embedding?: number[], input?: string, output?: string };
-    PRELOADED_EMBEDDINGS.push(item.embedding || []);
+    PRELOADED_EMBEDDINGS[i] = item.embedding || [];
 
     // 2. Build O(1) Exact Match Map
     if (item.input && item.output) {
