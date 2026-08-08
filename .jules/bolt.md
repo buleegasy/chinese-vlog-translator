@@ -63,3 +63,6 @@
 ## 2026-08-07 - [Module-Level Array Pre-allocation]
 **Learning:** In JavaScript/V8, initializing an empty array (`[]`) and dynamically `.push()`ing thousands of elements into it forces the engine to repeatedly reallocate memory and resize the underlying array structure.
 **Action:** When the final size of an array is known in advance (like iterating over a static dataset during module initialization), always pre-allocate the array using `new Array(size)` and assign values by index (`arr[i] = val`). This avoids dynamic resizing overhead and reduces module cold-start latency.
+## 2026-08-08 - [Loop Invariant Code Motion]
+**Learning:** In tight, unrolled loops (like cosine similarity calculations), placing arithmetic expressions like `len - 8` in the loop condition causes the JS engine to re-evaluate the subtraction on every single iteration.
+**Action:** Always hoist static math calculations out of loop conditions (`const limit = len - 8;`) into variables. This eliminates redundant operations and maximizes throughput in hot math paths.

@@ -63,7 +63,11 @@ if (isCorpusValid) {
 function cosineSimilarity(vecA: number[], vecB: number[], len: number): number {
   let dotProduct = 0;
   let i = 0;
-  for (; i <= len - 8; i += 8) {
+  // ⚡ Bolt Optimization: Loop Invariant Code Motion
+  // Hoist `len - 8` out of the loop condition to avoid redundant subtractions
+  // on every single iteration of this hot math loop.
+  const limit = len - 8;
+  for (; i <= limit; i += 8) {
     dotProduct += vecA[i] * vecB[i] +
                   vecA[i + 1] * vecB[i + 1] +
                   vecA[i + 2] * vecB[i + 2] +
