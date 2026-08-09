@@ -167,8 +167,8 @@ const BASE_SYSTEM_PROMPT_RULES = `
 // LLM 翻译函数
 async function translateWithGemini(apiKey: string, text: string, systemPrompt: string) {
   const genAI = new GoogleGenerativeAI(apiKey);
-  // 使用合法的 Gemini 模型版本，防止因找不到 3.5 导致报错降级
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash", systemInstruction: systemPrompt });
+  // 使用合法的 Gemini 模型版本
+  const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash", systemInstruction: systemPrompt });
   const result = await model.generateContent(text);
   return result.response.text().trim();
 }
