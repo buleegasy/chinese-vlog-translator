@@ -360,13 +360,44 @@ ${ragSection}
       // 2. 路由分流与翻译执行
       console.log(`[6] 开始请求大语言模型进行翻译...`);
       const t2 = Date.now();
-
+      
       if (useFallbackAsPrimary && fallbackKey) {
-        // 模式 A：直接走 OpenRouter (使用 MiniMax / 其他模型)
-        translatedText = await translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt);
-        const latency = Date.now() - t2;
-        providerUsed += `| Model: OpenRouter (${fallbackModel}, ${latency}ms)`;
-        console.log(`[7] 翻译完成 (OpenRouter - ${fallbackModel})，耗时: ${latency}ms`);
+        // 模式 A：强制优先走 OpenRouter
+        try {
+          translatedText = await timeoutPromise(
+            translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt),
+            8000,
+            "OpenRouter 响应超时 (8s)"
+          );
+          const latency = Date.now() - t2;
+          providerUsed += `| Model: OpenRouter (${fallbackModel}, ${latency}ms)`;
+          console.log(`[7] 翻译完成 (OpenRouter - ${fallbackModel})，耗时: ${latency}ms`);
+        } catch (openRouterError: unknown) {
+          const orLatency = Date.now() - t2;
+          const openRouterErrMsg = openRouterError instanceof Error ? openRouterError.message : String(openRouterError);
+          console.warn(`[!] OpenRouter 主选平台调用失败 (耗时: ${orLatency}ms)，自动尝试降级至原生 Gemini...`, openRouterErrMsg);
+          
+          const apiKey = process.env.GEMINI_API_KEY || "";
+          if (!apiKey) {
+            throw new Error(`主选平台 OpenRouter 失败 (${openRouterErrMsg || "Timeout"})，且未配置 GEMINI_API_KEY。`);
+          }
+
+          try {
+            console.log(`[6.5] 开始请求备用原生系统 (Google Gemini)...`);
+            const t3 = Date.now();
+            translatedText = await timeoutPromise(
+              translateWithGemini(apiKey, text, systemPrompt),
+              8000,
+              "Gemini 响应超时 (8s)"
+            );
+            const geminiLatency = Date.now() - t3;
+            providerUsed += `| Model: 备用降级 (Google Gemini, ${geminiLatency}ms)`;
+            console.log(`[7] 翻译完成 (备用降级 - Google Gemini)，耗时: ${geminiLatency}ms`);
+          } catch (geminiError: unknown) {
+            const geminiErrMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+            throw new Error(`主备双重失效。首选 OpenRouter 错误: ${openRouterErrMsg}; 备用 Gemini 错误: ${geminiErrMsg}`);
+          }
+        }
       } else {
         // 模式 B：优先 Gemini，失败后降级 OpenRouter
         const apiKey = process.env.GEMINI_API_KEY || "";
