@@ -291,6 +291,13 @@ export async function POST(req: Request) {
             top2Sim = similarity;
             top2Idx = i;
           }
+
+          // ⚡ Bolt Optimization: Safe Top-K Early Termination
+          // We can short-circuit this O(N) loop early ONLY if ALL required top-K
+          // results have found a near-perfect match (>0.99). Breaking on top1Sim
+          // alone would leave top2Sim uninitialized, but breaking on top2Sim ensures
+          // both top1 and top2 are populated with perfect matches.
+          if (top2Sim > 0.99) break;
         }
       }
 
