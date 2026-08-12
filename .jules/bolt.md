@@ -69,3 +69,7 @@
 ## 2026-08-11 - [Instruction-Level Parallelism in Unrolled Loops]
 **Learning:** In tight, unrolled mathematical loops (like cosine similarity), using a single accumulator (e.g., `sum += ...`) forces the CPU to wait for the previous addition to complete before starting the next one, creating a data dependency chain.
 **Action:** Use multiple independent accumulators (e.g., `sum0`, `sum1`, `sum2`, `sum3`) in unrolled loops. This breaks the data dependency chain, allowing V8 and the CPU's superscalar architecture to execute the floating-point additions concurrently, yielding a measurable speedup in hot O(N) paths.
+
+## 2024-08-12 - [Edge Runtime AbortController in Timeout]
+**Learning:** In Edge environments and API routes, implementing timeout logic using `Promise.race` or custom timers without passing an `AbortSignal` to the underlying network request leaves "zombie" promises executing in the background. This consumes connection pooling resources, compute, and rate limits even though the client has already received a timeout error.
+**Action:** When writing timeout wrappers around external APIs, always inject and trigger an `AbortController`. The timeout handler must call `controller.abort()` and pass the `signal` down to the `fetch` or SDK calls to eagerly cancel the network request and immediately free resources.
