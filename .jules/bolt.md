@@ -69,3 +69,7 @@
 ## 2026-08-11 - [Instruction-Level Parallelism in Unrolled Loops]
 **Learning:** In tight, unrolled mathematical loops (like cosine similarity), using a single accumulator (e.g., `sum += ...`) forces the CPU to wait for the previous addition to complete before starting the next one, creating a data dependency chain.
 **Action:** Use multiple independent accumulators (e.g., `sum0`, `sum1`, `sum2`, `sum3`) in unrolled loops. This breaks the data dependency chain, allowing V8 and the CPU's superscalar architecture to execute the floating-point additions concurrently, yielding a measurable speedup in hot O(N) paths.
+
+## 2024-11-20 - [AbortController for Eager Fetch Cancellation]
+**Learning:** In Edge environments and standard JavaScript environments, wrapping `fetch` or SDK API calls in a generic `Promise.race` timeout (or simply resolving/rejecting a local promise) doesn't actually stop the underlying network request. When the timeout hits, the local promise settles, but the background "zombie" network request continues fetching, consuming bandwidth, connection pooling resources, and counting against API rate limits.
+**Action:** When implementing timeout wrappers for network requests, always instantiate an `AbortController` and pass its `signal` down to the `fetch` or SDK client. When the timeout triggers, invoke `controller.abort()` to eagerly cancel the network request and immediately free up resources.
