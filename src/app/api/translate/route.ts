@@ -102,13 +102,18 @@ async function getCloudflareEmbedding(text: string, accountId: string, apiToken:
 }
 
 // 超时控制包装器
-function timeoutPromise<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+// ⚡ Bolt Optimization: Pass an AbortController signal into network calls
+// to eagerly cancel underlying fetch/SDK requests on timeout, preventing
+// zombie connections from consuming memory and rate limits.
+function timeoutPromise<T>(action: (signal: AbortSignal) => Promise<T>, ms: number, errorMsg: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    const controller = new AbortController();
     const timer = setTimeout(() => {
+      controller.abort();
       reject(new Error(errorMsg));
     }, ms);
 
-    promise
+    action(controller.signal)
       .then((value) => {
         clearTimeout(timer);
         resolve(value);
@@ -166,20 +171,21 @@ const BASE_SYSTEM_PROMPT_RULES = `
 - **直接输出最终的翻译结果，禁止输出任何思考过程、自我审查或解释说明，禁止使用Markdown格式。**`;
 
 // LLM 翻译函数
-async function translateWithGemini(apiKey: string, text: string, systemPrompt: string) {
+async function translateWithGemini(apiKey: string, text: string, systemPrompt: string, signal?: AbortSignal) {
   const genAI = new GoogleGenerativeAI(apiKey);
   // 使用合法的 Gemini 模型版本
   const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash", systemInstruction: systemPrompt });
-  const result = await model.generateContent(text);
+  const result = await model.generateContent(text, { signal });
   return result.response.text().trim();
 }
 
-async function translateWithFallback(apiKey: string, baseUrl: string, model: string, text: string, systemPrompt: string) {
+async function translateWithFallback(apiKey: string, baseUrl: string, model: string, text: string, systemPrompt: string, signal?: AbortSignal) {
   const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }], temperature: 0.7 })
+    body: JSON.stringify({ model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: text }], temperature: 0.7 }),
+    signal
   });
   if (!response.ok) throw new Error(`备用 API 错误 (${response.status}): ${await response.text()}`);
   const data = await response.json();
@@ -373,7 +379,7 @@ ${ragSection}
         // 模式 A：强制优先走 OpenRouter
         try {
           translatedText = await timeoutPromise(
-            translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt),
+            (signal) => translateWithFallback(fallbackKey, fallbackUrl, fallbackModel, text, systemPrompt, signal),
             8000,
             "OpenRouter 响应超时 (8s)"
           );
@@ -394,7 +400,7 @@ ${ragSection}
             console.log(`[6.5] 开始请求备用原生系统 (Google Gemini)...`);
             const t3 = Date.now();
             translatedText = await timeoutPromise(
-              translateWithGemini(apiKey, text, systemPrompt),
+              (signal) => translateWithGemini(apiKey, text, systemPrompt, signal),
               8000,
               "Gemini 响应超时 (8s)"
             );
@@ -411,7 +417,7 @@ ${ragSection}
         const apiKey = process.env.GEMINI_API_KEY || "";
         try {
           translatedText = await timeoutPromise(
-            translateWithGemini(apiKey, text, systemPrompt),
+            (signal) => translateWithGemini(apiKey, text, systemPrompt, signal),
             8000,
             "Gemini 响应超时 (8s)"
           );
