@@ -69,3 +69,6 @@
 ## 2026-08-11 - [Instruction-Level Parallelism in Unrolled Loops]
 **Learning:** In tight, unrolled mathematical loops (like cosine similarity), using a single accumulator (e.g., `sum += ...`) forces the CPU to wait for the previous addition to complete before starting the next one, creating a data dependency chain.
 **Action:** Use multiple independent accumulators (e.g., `sum0`, `sum1`, `sum2`, `sum3`) in unrolled loops. This breaks the data dependency chain, allowing V8 and the CPU's superscalar architecture to execute the floating-point additions concurrently, yielding a measurable speedup in hot O(N) paths.
+## 2026-08-12 - [Eager Cancellation of Zombie Network Requests]
+**Learning:** In Edge environments and API routes, merely rejecting a local Promise on timeout leaves the underlying network request (`fetch` or SDK calls like Gemini) running in the background. These "zombie" requests silently consume memory, CPU, bandwidth, and importantly, third-party API rate limits and costs.
+**Action:** Use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (by passing the `signal`) when a timeout occurs, rather than just rejecting the wrapping promise.
