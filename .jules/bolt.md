@@ -72,3 +72,7 @@
 ## 2026-08-12 - [Eager Cancellation of Zombie Network Requests]
 **Learning:** In Edge environments and API routes, merely rejecting a local Promise on timeout leaves the underlying network request (`fetch` or SDK calls like Gemini) running in the background. These "zombie" requests silently consume memory, CPU, bandwidth, and importantly, third-party API rate limits and costs.
 **Action:** Use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (by passing the `signal`) when a timeout occurs, rather than just rejecting the wrapping promise.
+
+## 2024-10-24 - [Native AbortSignal vs timeoutPromise wrapper]
+**Learning:** Node.js 16.14+ and Edge environments support `AbortSignal.timeout(ms)` natively. The `timeoutPromise` wrapper used in the codebase is a good optimization, but `AbortSignal.timeout(ms)` could provide an even cleaner implementation without the custom wrapper.
+**Action:** While the codebase uses a custom wrapper, keep in mind `AbortSignal.timeout` as a more robust and native alternative.
