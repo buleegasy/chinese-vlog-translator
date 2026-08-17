@@ -72,3 +72,6 @@
 ## 2026-08-12 - [Eager Cancellation of Zombie Network Requests]
 **Learning:** In Edge environments and API routes, merely rejecting a local Promise on timeout leaves the underlying network request (`fetch` or SDK calls like Gemini) running in the background. These "zombie" requests silently consume memory, CPU, bandwidth, and importantly, third-party API rate limits and costs.
 **Action:** Use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (by passing the `signal`) when a timeout occurs, rather than just rejecting the wrapping promise.
+## 2024-05-24 - [Edge Runtime Timeouts]
+**Learning:** Unprotected network calls (like `fetch` without an `AbortSignal`) in Edge routes can cause requests to hang indefinitely. Not only does this consume CPU/memory, but it also permanently blocks request coalescing mechanisms (e.g., leaving Promises stuck in a `Map` that never resolve or reject).
+**Action:** Always use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (`fetch` or SDK calls) instead of just rejecting the local promise. This prevents "zombie" connections.
