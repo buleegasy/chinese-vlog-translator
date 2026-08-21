@@ -72,3 +72,6 @@
 ## 2026-08-12 - [Eager Cancellation of Zombie Network Requests]
 **Learning:** In Edge environments and API routes, merely rejecting a local Promise on timeout leaves the underlying network request (`fetch` or SDK calls like Gemini) running in the background. These "zombie" requests silently consume memory, CPU, bandwidth, and importantly, third-party API rate limits and costs.
 **Action:** Use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (by passing the `signal`) when a timeout occurs, rather than just rejecting the wrapping promise.
+## 2024-11-21 - [AbortSignal Propagation in timeoutPromise]
+**Learning:** The `timeoutPromise` utility in the translation route correctly takes a callback function `(signal: AbortSignal) => Promise<T>` instead of a plain Promise. This allows it to inject an internally created `AbortSignal` into the underlying task so it can be aborted if the timeout is reached.
+**Action:** When wrapping API or SDK calls in `timeoutPromise`, make sure to pass the `signal` down to the actual implementation (like `fetch`) so that zombie network requests can be eagerly cancelled.
