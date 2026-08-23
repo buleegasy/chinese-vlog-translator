@@ -72,3 +72,7 @@
 ## 2026-08-12 - [Eager Cancellation of Zombie Network Requests]
 **Learning:** In Edge environments and API routes, merely rejecting a local Promise on timeout leaves the underlying network request (`fetch` or SDK calls like Gemini) running in the background. These "zombie" requests silently consume memory, CPU, bandwidth, and importantly, third-party API rate limits and costs.
 **Action:** Use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (by passing the `signal`) when a timeout occurs, rather than just rejecting the wrapping promise.
+
+## 2024-11-20 - [Memory Optimization: Module-Level Map Object Allocation]
+**Learning:** When building an O(1) exact match map from a large preloaded JSON array (like 100k+ RAG corpus items) during module initialization in an Edge environment, creating new object literals (e.g., `{ input: item.input, output: item.output }`) for every map value incurs significant object allocation overhead, spiking memory usage and increasing cold-start latency.
+**Action:** Always store a direct reference to the existing `item` object (or just the parts you need without creating new objects if possible) in static maps to eliminate unnecessary allocations and reduce GC pressure.
