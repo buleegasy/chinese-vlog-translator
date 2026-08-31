@@ -85,7 +85,7 @@ function cosineSimilarity(vecA: number[], vecB: number[], len: number): number {
 }
 
 // 实时获取用户的输入向量
-async function getCloudflareEmbedding(text: string, accountId: string, apiToken: string) {
+async function getCloudflareEmbedding(text: string, accountId: string, apiToken: string, signal?: AbortSignal) {
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/baai/bge-m3`;
   const response = await fetch(url, {
     method: 'POST',
@@ -93,7 +93,8 @@ async function getCloudflareEmbedding(text: string, accountId: string, apiToken:
       'Authorization': `Bearer ${apiToken}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({ text: [text] })
+    body: JSON.stringify({ text: [text] }),
+    signal
   });
   if (!response.ok) throw new Error(`CF Embedding Failed: ${response.status}`);
   const result = await response.json();
@@ -252,7 +253,16 @@ export async function POST(req: Request) {
 
       console.log(`[2] 开始请求 Cloudflare API 获取输入向量...`);
       const t0 = Date.now();
-      const queryVector = await getCloudflareEmbedding(text, cfAccountId, cfApiToken);
+
+      // ⚡ Bolt Optimization: Eager Cancellation of Zombie Network Requests
+      // Wrap embedding fetch with timeoutPromise to pass AbortSignal.
+      // This eagerly cancels the network fetch if it takes too long, preventing it
+      // from hanging forever and leaving a zombie Promise stuck in the pendingTranslations map.
+      const queryVector = await timeoutPromise(
+        (signal) => getCloudflareEmbedding(text, cfAccountId, cfApiToken, signal),
+        5000,
+        "Cloudflare Vector Embedding 响应超时 (5s)"
+      );
       console.log(`[3] 获取向量成功，耗时: ${Date.now() - t0}ms, 维度: ${queryVector.length}`);
 
       if (!PRELOADED_CORPUS?.length || !(PRELOADED_CORPUS[0] as { embedding?: unknown }).embedding) {
