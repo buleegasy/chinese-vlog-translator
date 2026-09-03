@@ -72,3 +72,7 @@
 ## 2026-08-12 - [Eager Cancellation of Zombie Network Requests]
 **Learning:** In Edge environments and API routes, merely rejecting a local Promise on timeout leaves the underlying network request (`fetch` or SDK calls like Gemini) running in the background. These "zombie" requests silently consume memory, CPU, bandwidth, and importantly, third-party API rate limits and costs.
 **Action:** Use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (by passing the `signal`) when a timeout occurs, rather than just rejecting the wrapping promise.
+
+## 2026-08-13 - [Generous Timeouts for AI Endpoints]
+**Learning:** Setting overly aggressive timeouts (like 5 seconds) for external 3rd-party AI endpoints (e.g., Cloudflare embedding APIs) leads to premature network abortion failures under normal AI processing variance and load.
+**Action:** When setting request timeouts for external 3rd-party AI endpoints, use generous timeouts (like 10 seconds) to accommodate processing spikes while still providing an upper bound for zombie connection cancellation.
