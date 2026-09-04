@@ -72,3 +72,6 @@
 ## 2026-08-12 - [Eager Cancellation of Zombie Network Requests]
 **Learning:** In Edge environments and API routes, merely rejecting a local Promise on timeout leaves the underlying network request (`fetch` or SDK calls like Gemini) running in the background. These "zombie" requests silently consume memory, CPU, bandwidth, and importantly, third-party API rate limits and costs.
 **Action:** Use an `AbortController` in timeout wrappers to eagerly cancel underlying network requests (by passing the `signal`) when a timeout occurs, rather than just rejecting the wrapping promise.
+## 2026-08-13 - [Hanging Network Requests Block Coalescing Maps]
+**Learning:** If a network request (like `fetch` for embeddings) is awaited inside a shared Promise used for Request Coalescing (e.g., a `pendingTranslations` Map), and that request hangs indefinitely without an AbortSignal timeout, it creates a permanent "zombie" Promise. This permanently blocks the coalescing Map for that specific key, causing all future identical requests to hang or eventually timeout.
+**Action:** Always wrap underlying network requests (like `getCloudflareEmbedding`) that block shared coalescing promises in a timeout wrapper that eagerly passes an `AbortSignal`.
